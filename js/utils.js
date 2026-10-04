@@ -49,6 +49,36 @@ function formatQuantite(n) {
   return Number(arrondi(n, 3)).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 }
 
+// ---------- Tarification : détail, gros, carton ----------
+// Une ligne de panier contient : qte, prixUSD (détail), prixGrosUSD + seuilGros (facultatif),
+// cartonQte + prixCartonUSD (facultatif). Règle :
+//   1) chaque carton complet est vendu au prix du carton (si un prix carton existe)
+//   2) le reste est vendu au prix de gros s'il atteint le seuil, sinon au prix de détail
+function totalLigne(l) {
+  let reste = l.qte, total = 0;
+  if (l.cartonQte >= 2 && l.prixCartonUSD != null) {
+    const cartons = Math.floor(reste / l.cartonQte + 1e-9);
+    total += cartons * l.prixCartonUSD;
+    reste = arrondi(reste - cartons * l.cartonQte, 3);
+  }
+  const prixUnitaire = (l.prixGrosUSD != null && l.seuilGros >= 2 && reste >= l.seuilGros) ? l.prixGrosUSD : l.prixUSD;
+  return arrondi(total + reste * prixUnitaire, 6);
+}
+// Petit texte qui explique le tarif appliqué à la ligne
+function descriptionTarif(l) {
+  const parts = [];
+  let reste = l.qte;
+  if (l.cartonQte >= 2 && l.prixCartonUSD != null) {
+    const cartons = Math.floor(reste / l.cartonQte + 1e-9);
+    if (cartons > 0) { parts.push(cartons + ' carton' + (cartons > 1 ? 's' : '') + ' à ' + formatUSD(l.prixCartonUSD)); reste = arrondi(reste - cartons * l.cartonQte, 3); }
+  }
+  if (reste > 0) {
+    const gros = l.prixGrosUSD != null && l.seuilGros >= 2 && reste >= l.seuilGros;
+    parts.push(formatQuantite(reste) + ' x ' + formatUSD(gros ? l.prixGrosUSD : l.prixUSD) + (gros ? ' (gros)' : ''));
+  }
+  return parts.join(' + ');
+}
+
 // ---------- Dates ----------
 function debutJour(d = new Date()) {
   const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime();
@@ -152,6 +182,7 @@ function confirmer(titre, message, texteOui = 'Oui', danger = false) {
   });
 }
 
+
 // Enregistre un fichier sur le téléphone (téléchargement ou partage)
 async function enregistrerFichier(nom, contenu, type) {
   const blob = new Blob([contenu], { type });
@@ -173,5 +204,5 @@ async function enregistrerFichier(nom, contenu, type) {
 
 // Pour pouvoir tester les fonctions pures avec Node (sans effet dans le navigateur)
 if (typeof module !== 'undefined') {
-  module.exports = { arrondi, lireNombre, versUSD, depuisUSD, normaliserTel, hacher, debutSemaine, formatUSD, formatCDF };
+  module.exports = { arrondi, lireNombre, versUSD, depuisUSD, normaliserTel, hacher, debutSemaine, formatUSD, formatCDF, totalLigne };
 }

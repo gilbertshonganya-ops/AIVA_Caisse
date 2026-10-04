@@ -36,6 +36,15 @@ const Demo = (() => {
     ['Sardines boîte', 'Alimentation', 'USD', 0.80, 1.20, 3, 8]             // stock bas : alerte
   ];
 
+  // Tarifs de gros et de carton pour quelques produits (index dans PRODUITS)
+  const EXTRAS = {
+    0: { prixGros: 1.40, seuilGros: 10 },
+    1: { cartonQte: 4, prixCarton: 26 },
+    8: { cartonQte: 12, prixCarton: 27000 },
+    10: { prixGros: 1600, seuilGros: 6, cartonQte: 24, prixCarton: 40000 },
+    11: { prixGros: 1000, seuilGros: 10 }
+  };
+
   const CLIENTS = [
     { id: 1, nom: 'Mama Julie', tel: '0812345678' },
     { id: 2, nom: 'Papa Joseph', tel: '0998765432' },
@@ -50,6 +59,7 @@ const Demo = (() => {
       stock: p[5], seuil: p[6],
       codeBarres: i < 12 ? '20000000' + String(i + 1).padStart(5, '0') : ''
     }));
+    produits.forEach((p, i) => Object.assign(p, { prixGros: null, seuilGros: null, cartonQte: null, prixCarton: null }, EXTRAS[i] || {}));
     const vendus = {}; // quantités vendues par produit (pour calculer le stock de départ)
     const ventes = [], mouvements = [], dettes = [];
     let idVente = 1, idMvt = 1, idDette = 1;
@@ -112,6 +122,27 @@ const Demo = (() => {
     const dPaiement = new Date(maintenant); dPaiement.setDate(dPaiement.getDate() - 5); dPaiement.setHours(16, 10, 0, 0);
     dettes.push({ id: idDette++, clientId: 2, date: dPaiement.getTime(), type: 'paiement', montantUSD: 10, mode: 'especes', note: 'Paiement partiel' });
 
+    // Dépenses de la boutique (petits montants pour rester réalistes avec les ventes de démonstration)
+    const depenses = [[13, 'Transport', 3000, 'CDF', 'Taxi pour le marché'], [10, 'Électricité', 4, 'USD', 'Recharge compteur'],
+      [6, 'Transport', 2500, 'CDF', ''], [3, 'Eau', 1500, 'CDF', ''], [1, 'Emballages', 2, 'USD', 'Sachets']].map((x, i) => {
+      const dt = new Date(maintenant); dt.setDate(dt.getDate() - x[0]); dt.setHours(9, 30, 0, 0);
+      return { id: i + 1, date: dt.getTime(), categorie: x[1], montant: x[2], devise: x[3], taux, montantUSD: arrondi(versUSD(x[2], x[3], taux), 6), note: x[4], auteur: 'Patron' };
+    });
+
+    // Fournisseurs et achats (le stock de démonstration est déjà final : on enregistre seulement l'historique)
+    const fournisseurs = [{ id: 1, nom: 'Grossiste Marché Central', tel: '0811112222' }, { id: 2, nom: 'Dépôt Limete', tel: '' }];
+    const achats = [], dettesFournisseurs = [];
+    [[6, 1, [[0, 20, 1.10], [1, 10, 5.4]], 50], [3, 2, [[8, 24, 1700], [11, 30, 750]], null]].forEach(([j, idF, lignes, paye], i) => {
+      const dt = new Date(maintenant); dt.setDate(dt.getDate() - j); dt.setHours(10, 15, 0, 0);
+      const ls = lignes.map(([idx, qte, prix]) => ({ produitId: produits[idx].id, nom: produits[idx].nom, qte, prixAchat: prix, devise: produits[idx].devise, prixUnitaireUSD: arrondi(versUSD(prix, produits[idx].devise, taux), 6) }));
+      const total = arrondi(ls.reduce((s, l) => s + l.qte * l.prixUnitaireUSD, 0), 6);
+      const payeUSD = paye === null ? total : paye;
+      const a = { id: i + 1, date: dt.getTime(), fournisseurId: idF, fournisseurNom: fournisseurs[idF - 1].nom, lignes: ls, totalUSD: total, payeUSD, resteUSD: arrondi(total - payeUSD, 6), taux, note: '', auteur: 'Patron' };
+      achats.push(a);
+      ls.forEach((l) => mouvements.push({ id: idMvt++, produitId: l.produitId, nom: l.nom, date: a.date, type: 'entree', qte: l.qte, note: 'Achat - ' + a.fournisseurNom, vendeur: 'Patron' }));
+      if (a.resteUSD > 0.005) dettesFournisseurs.push({ id: dettesFournisseurs.length + 1, fournisseurId: idF, date: a.date, type: 'dette', montantUSD: a.resteUSD, achatId: a.id, note: 'Achat n° ' + a.id });
+    });
+
     // Stock de départ = stock final voulu + quantités vendues (le stock final reste celui de la liste ci-dessus)
     produits.forEach((p) => { p.stock = arrondi(p.stock, 3); });
     // (le stock affiché est donc le stock FINAL : les ventes de démo ne le diminuent pas une 2e fois)
@@ -128,7 +159,7 @@ const Demo = (() => {
 
     return {
       application: 'AIVA Caisse', version: 1, date: maintenant,
-      donnees: { produits, ventes, clients: CLIENTS.map((c) => ({ ...c })), dettes, mouvements, params }
+      donnees: { produits, ventes, clients: CLIENTS.map((c) => ({ ...c })), dettes, mouvements, depenses, fournisseurs, achats, dettesFournisseurs, params }
     };
   }
 

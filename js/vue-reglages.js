@@ -23,12 +23,22 @@ const VueReglages = {
       '<div class="carte"><h3>Sauvegarde</h3><div style="height:8px"></div>' +
         '<p class="petit">' + (r.derniereSauvegarde ? 'Dernière sauvegarde : ' + formatDateHeure(r.derniereSauvegarde) : 'Aucune sauvegarde faite.') + '</p>' +
         '<div class="pile">' +
-          '<button class="btn" id="rExport">Sauvegarder toutes mes données</button>' +
+          '<button class="btn" id="rExportChiffre">Sauvegarde protégée par mot de passe</button>' +
+          '<button class="btn contour" id="rExport">Sauvegarde simple (non protégée)</button>' +
           '<button class="btn contour" id="rImport">Restaurer une sauvegarde</button>' +
           '<input type="file" id="fichierImport" accept="application/json,.json" hidden>' +
           '<button class="btn gris" id="rCsvVentes">Exporter les ventes (Excel/CSV)</button>' +
           '<button class="btn gris" id="rCsvStock">Exporter le stock (Excel/CSV)</button>' +
-        '</div></div>' +
+        '</div><p class="petit" style="margin-top:10px">La sauvegarde protégée est chiffrée (AES-256). Sans le mot de passe, personne ne peut la rouvrir, pas même nous.</p></div>' +
+
+      '<div class="carte"><h3>Imprimante de tickets</h3><div style="height:8px"></div>' +
+        '<label class="champ"><span>Mode d\'impression</span><select id="rImpMode">' +
+          '<option value="systeme">Impression du téléphone / PDF</option>' +
+          '<option value="ble">Bluetooth direct (imprimante Bluetooth LE)</option>' +
+          '<option value="rawbt">Application RawBT (Bluetooth classique)</option></select></label>' +
+        '<label class="champ"><span>Largeur du papier</span><select id="rImpLarg"><option value="32">58 mm (32 caractères)</option><option value="48">80 mm (48 caractères)</option></select></label>' +
+        '<div class="pile"><button class="btn" id="rImpSave">Enregistrer</button><button class="btn gris" id="rImpTest">Imprimer un ticket de test</button><button class="btn gris" id="rImpOublier">Choisir une autre imprimante</button></div>' +
+        '<p class="petit" style="margin-top:10px">Le mode Bluetooth direct ne marche qu\'avec les imprimantes Bluetooth LE, dans Chrome Android. Si votre imprimante n\'apparaît pas, installez l\'application gratuite RawBT et choisissez ce mode.</p></div>' +
 
       '<div class="carte"><h3>Données</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn contour" id="rDemo">Charger les données de démonstration</button>' +
@@ -36,9 +46,11 @@ const VueReglages = {
 
       '<div class="carte"><h3>Application</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn gris" id="rInstall">Installer sur l\'écran d\'accueil</button>' +
-        '<p class="petit texte-centre">AIVA Caisse version 1.0.0 &middot; fonctionne hors connexion</p></div></div>';
+        '<p class="petit texte-centre">AIVA Caisse version 1.1.0 &middot; fonctionne hors connexion</p></div></div>';
 
     $('#rAff').value = r.affichage;
+    $('#rImpMode').value = r.imprimeMode || 'systeme';
+    $('#rImpLarg').value = String(r.imprimeLargeur || 32);
 
     $('#rSaveBoutique').addEventListener('click', async () => {
       const nom = $('#rNom').value.trim();
@@ -51,7 +63,9 @@ const VueReglages = {
     $('#rSaveTaux').addEventListener('click', async () => {
       const t = lireNombre($('#rTaux').value);
       if (isNaN(t) || t < 1 || t > 100000) { toast('Taux invalide (exemple : 2800)', 'erreur'); return; }
+      const ancienTaux = r.taux;
       await App.sauverReglage('taux', t);
+      if (Number(ancienTaux) !== t) Audit.log('taux_modifie', { taux: [ancienTaux, t] });
       await App.sauverReglage('affichage', $('#rAff').value);
       toast('Taux enregistré : 1 $ = ' + formatCDF(t), 'ok');
       VueCaisse.panier = []; // les prix du panier dépendent du taux : on repart propre
@@ -65,6 +79,7 @@ const VueReglages = {
       if (hp === hv) { toast('Le PIN du patron et du vendeur doivent être différents', 'erreur'); return; }
       if (p) { await App.sauverReglage('pinPatron', hp); await App.sauverReglage('pinChange', true); }
       if (v) await App.sauverReglage('pinVendeur', hv);
+      Audit.log('pin_modifie', { patron: !!p, vendeur: !!v });
       toast('PIN modifié(s)', 'ok'); App.rafraichir();
     });
 
@@ -72,10 +87,23 @@ const VueReglages = {
       const sauvegarde = await DB.exporterTout();
       await enregistrerFichier('aiva-caisse-sauvegarde-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(sauvegarde), 'application/json');
       await App.sauverReglage('derniereSauvegarde', Date.now());
+      Audit.log('sauvegarde', { chiffree: false });
       toast('Sauvegarde créée. Gardez le fichier en lieu sûr.', 'ok'); App.rafraichir();
     });
+    $('#rExportChiffre').addEventListener('click', () => this.sauvegardeChiffree());
+    $('#rImpSave').addEventListener('click', async () => {
+      await App.sauverReglage('imprimeMode', $('#rImpMode').value);
+      await App.sauverReglage('imprimeLargeur', Number($('#rImpLarg').value));
+      toast('Imprimante enregistrée', 'ok');
+    });
+    $('#rImpTest').addEventListener('click', async () => {
+      await App.sauverReglage('imprimeMode', $('#rImpMode').value);
+      await App.sauverReglage('imprimeLargeur', Number($('#rImpLarg').value));
+      Imprimante.imprimerTest();
+    });
+    $('#rImpOublier').addEventListener('click', () => { Imprimante.oublier(); toast('Au prochain ticket, choisissez votre imprimante'); });
     $('#rImport').addEventListener('click', () => $('#fichierImport').click());
-    $('#fichierImport').addEventListener('change', (e) => this.restaurer(e.target.files[0]));
+    $('#fichierImport').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; this.restaurer(f); }); // value vidée : on peut rechoisir le même fichier
     $('#rCsvVentes').addEventListener('click', () => this.exporterCsvVentes());
     $('#rCsvStock').addEventListener('click', () => this.exporterCsvStock());
     $('#rDemo').addEventListener('click', () => this.chargerDemo());
@@ -86,16 +114,60 @@ const VueReglages = {
     });
   },
 
+  // Demande un mot de passe dans une fenêtre. Retourne le texte saisi, ou null si annulé.
+  demanderMotDePasse(titre, message, confirmation) {
+    return new Promise((resolve) => {
+      let valeur = null;
+      const f = ouvrirFenetre(titre,
+        '<p class="petit">' + esc(message) + '</p>' +
+        '<label class="champ"><span>Mot de passe</span><input id="mdp1" type="password" autocomplete="off"></label>' +
+        (confirmation ? '<label class="champ"><span>Répétez le mot de passe</span><input id="mdp2" type="password" autocomplete="off"></label>' : '') +
+        '<button class="btn" id="mdpOk">Valider</button>', { auFermer: () => resolve(valeur), verrouille: true });
+      $('#mdp1', f.el).focus();
+      $('#mdpOk', f.el).addEventListener('click', () => {
+        const a = $('#mdp1', f.el).value;
+        if (a.length < 6) { toast('Le mot de passe doit avoir au moins 6 caractères', 'erreur'); return; }
+        if (confirmation && a !== $('#mdp2', f.el).value) { toast('Les deux mots de passe sont différents', 'erreur'); return; }
+        valeur = a; f.fermer();
+      });
+    });
+  },
+
+  async sauvegardeChiffree() {
+    if (!Coffre.disponible()) { toast('Le chiffrement exige HTTPS (ou localhost). Hébergez l\'application en HTTPS.', 'erreur'); return; }
+    const mdp = await this.demanderMotDePasse('Protéger la sauvegarde',
+      'Choisissez un mot de passe (6 caractères minimum). ATTENTION : si vous le perdez, la sauvegarde sera impossible à ouvrir.', true);
+    if (!mdp) return;
+    try {
+      toast('Chiffrement en cours...');
+      const donnees = await DB.exporterTout();
+      const fichier = await Coffre.chiffrer(JSON.stringify(donnees), mdp);
+      await enregistrerFichier('aiva-caisse-sauvegarde-protegee-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(fichier), 'application/json');
+      await App.sauverReglage('derniereSauvegarde', Date.now());
+      Audit.log('sauvegarde', { chiffree: true });
+      toast('Sauvegarde protégée créée', 'ok'); App.rafraichir();
+    } catch (e) { toast(e.message, 'erreur'); }
+  },
+
   async restaurer(fichier) {
     if (!fichier) return;
     try {
-      const sauvegarde = JSON.parse(await fichier.text());
+      let sauvegarde = JSON.parse(await fichier.text());
+      if (sauvegarde && sauvegarde.chiffre) {
+        const mdp = await this.demanderMotDePasse('Sauvegarde protégée', 'Entrez le mot de passe choisi lors de la sauvegarde.', false);
+        if (!mdp) return;
+        sauvegarde = JSON.parse(await Coffre.dechiffrer(sauvegarde, mdp));
+      }
       if (!sauvegarde || sauvegarde.application !== 'AIVA Caisse') throw new Error('Ce fichier n\'est pas une sauvegarde AIVA Caisse');
       const n = (sauvegarde.donnees.produits || []).length;
       if (!(await confirmer('Restaurer la sauvegarde', 'Cela REMPLACE toutes les données actuelles par celles du fichier (' + n + ' produits). Continuer ?', 'Restaurer', true))) return;
+      // Le journal d'audit de ce téléphone est conservé s'il existe (sinon on prend celui de la sauvegarde)
+      const auditActuel = await DB.tout('audit');
+      if (auditActuel.length) sauvegarde.donnees.audit = auditActuel;
       await DB.importerTout(sauvegarde);
       await App.chargerReglages();
       VueCaisse.panier = [];
+      await Audit.log('restauration', { produits: n, fichier: fichier.name });
       toast('Sauvegarde restaurée', 'ok');
       App.verrouiller(); // les PIN ont peut-être changé : on redemande le code
     } catch (e) {
@@ -107,7 +179,9 @@ const VueReglages = {
     if (!(await confirmer('Données de démonstration', 'Cela remplace vos produits, ventes et clients actuels par un exemple de boutique. Vos PIN et réglages sont gardés. Continuer ?', 'Charger la démo'))) return;
     const params = await DB.tout('params');
     const demo = Demo.generer(App.taux(), params);
+    demo.donnees.audit = await DB.tout('audit'); // le journal d'audit n'est jamais remplacé par la démo
     await DB.importerTout(demo);
+    await Audit.log('demo_chargee', {});
     VueCaisse.panier = [];
     toast('Démonstration chargée', 'ok');
     App.aller('caisse');
@@ -116,9 +190,8 @@ const VueReglages = {
   async toutEffacer() {
     if (!(await confirmer('Tout effacer', 'Produits, ventes, clients et dettes seront supprimés pour toujours. Avez-vous fait une sauvegarde ?', 'Tout effacer', true))) return;
     if (!(await confirmer('Dernière question', 'Cette action est irréversible. Effacer vraiment ?', 'Oui, effacer', true))) return;
-    const params = await DB.tout('params');
-    await DB.toutEffacer();
-    await DB.importerTout({ application: 'AIVA Caisse', donnees: { params } }); // on garde les réglages et les PIN
+    await DB.toutEffacer(['params', 'audit']); // on garde les réglages, les PIN et le journal d'audit
+    await Audit.log('donnees_effacees', {});
     VueCaisse.panier = [];
     toast('Toutes les données ont été effacées');
     App.aller('caisse');

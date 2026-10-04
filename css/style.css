@@ -217,3 +217,8 @@ p { margin: 0 0 10px; }
 #toast.visible { opacity: 1; transform: translate(-50%, 0); }
 #toast.erreur { background: var(--couleur-danger); }
 #toast.ok { background: var(--couleur-principale); }
+
+/* ---------- Options repliables (formulaire produit) ---------- */
+details.options { background: #f6f8f7; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+details.options summary { font-weight: 700; color: var(--couleur-principale); cursor: pointer; }
+details.options[open] summary { margin-bottom: 8px; }

@@ -2,7 +2,7 @@
    Démarrage, réglages, connexion par PIN, navigation entre les écrans. */
 const App = {
   // Réglages par défaut (modifiables dans l'écran Réglages)
-  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', pinPatron: '', pinVendeur: '', pinChange: false, derniereSauvegarde: 0 },
+  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', pinPatron: '', pinVendeur: '', pinChange: false, derniereSauvegarde: 0, imprimeMode: 'systeme', imprimeLargeur: 32 },
   role: null,            // 'patron' ou 'vendeur' (null = verrouillé)
   onglet: null,
   derniereActivite: Date.now(),
@@ -11,14 +11,27 @@ const App = {
   bloquePinJusqua: 0,
   DELAI_VERROU_MS: 10 * 60 * 1000, // verrouillage automatique après 10 minutes sans toucher l'écran
 
-  // Liste des écrans. "roles" = qui a le droit de les voir.
+  // Liste des écrans. "roles" = qui a le droit de les voir. "parent" = écran rangé dans le menu Plus.
   onglets: [
     { id: 'caisse',   titre: 'Caisse',   icone: '\u{1F6D2}', roles: ['patron', 'vendeur'], vue: () => VueCaisse },
     { id: 'stock',    titre: 'Stock',    icone: '\u{1F4E6}', roles: ['patron', 'vendeur'], vue: () => VueStock },
     { id: 'dettes',   titre: 'Dettes',   icone: '\u{1F4D2}', roles: ['patron', 'vendeur'], vue: () => VueDettes },
     { id: 'rapports', titre: 'Rapports', icone: '\u{1F4CA}', roles: ['patron'],            vue: () => VueRapports },
-    { id: 'reglages', titre: 'Réglages', icone: '\u2699\uFE0F', roles: ['patron'],         vue: () => VueReglages }
+    { id: 'plus',     titre: 'Plus',     icone: '\u2630',    roles: ['patron'],            vue: () => VuePlus },
+    { id: 'depenses', titre: 'Dépenses',  roles: ['patron'], parent: 'plus', vue: () => VueDepenses },
+    { id: 'achats',   titre: 'Achats',    roles: ['patron'], parent: 'plus', vue: () => VueAchats },
+    { id: 'import',   titre: 'Import',    roles: ['patron'], parent: 'plus', vue: () => VueImport },
+    { id: 'audit',    titre: 'Journal',   roles: ['patron'], parent: 'plus', vue: () => VueAudit },
+    { id: 'reglages', titre: 'Réglages',  roles: ['patron'], parent: 'plus', vue: () => VueReglages }
   ],
+
+  // Bouton « Retour » placé en haut des écrans rangés dans Plus
+  htmlRetour() { return '<button class="btn gris petit-btn" data-retour style="margin-bottom:12px">&lsaquo; Retour</button>'; },
+
+  // En-tête d'un écran du menu Plus : bouton Retour + titre
+  entete(titre) { return this.htmlRetour() + '<h2>' + esc(titre) + '</h2>'; },
+  // Le bouton Retour est géré par un écouteur unique (voir installerEvenements) : rien à brancher ici
+  brancherRetour() {},
 
   estPatron() { return this.role === 'patron'; },
   taux() { return Number(this.reglages.taux) || 2800; },
@@ -84,6 +97,8 @@ const App = {
     majReseau();
 
     $('#btnQuitter').addEventListener('click', () => this.verrouiller());
+    // Bouton « Retour » des écrans du menu Plus (un seul écouteur pour tous les écrans)
+    $('#vue').addEventListener('click', (e) => { if (e.target.closest('[data-retour]')) this.aller('plus'); });
     ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { this.derniereActivite = Date.now(); }, { passive: true }));
     setInterval(() => {
       if (this.role && Date.now() - this.derniereActivite > this.DELAI_VERROU_MS) {
@@ -139,8 +154,10 @@ const App = {
       if (hacher(saisie) === attendu) {
         this.essaisPin = 0;
         this.ouvrirSession(roleChoisi);
+        Audit.log('connexion', { role: roleChoisi });
       } else {
         this.essaisPin += 1;
+        Audit.log('echec_connexion', { role: roleChoisi, essai: this.essaisPin });
         saisie = ''; majPoints();
         if (this.essaisPin >= 5) {
           this.bloquePinJusqua = maintenant + 30000; this.essaisPin = 0;
@@ -173,7 +190,7 @@ const App = {
     $('#infoRole').textContent = role === 'patron' ? 'Patron' : 'Vendeur';
     $('#menu').hidden = false;
     $('#btnQuitter').hidden = false;
-    const visibles = this.onglets.filter((o) => o.roles.includes(role));
+    const visibles = this.onglets.filter((o) => o.roles.includes(role) && !o.parent);
     $('#menu').innerHTML = visibles.map((o) =>
       '<button data-onglet="' + o.id + '"><span class="ico">' + o.icone + '</span>' + o.titre + '</button>').join('');
     $$('#menu button').forEach((b) => b.addEventListener('click', () => this.aller(b.dataset.onglet)));
@@ -184,7 +201,7 @@ const App = {
     const onglet = this.onglets.find((o) => o.id === id);
     if (!onglet || !onglet.roles.includes(this.role)) return; // sécurité : pas d'accès sans le bon rôle
     this.onglet = id;
-    $$('#menu button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === id));
+    $$('#menu button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === (onglet.parent || id)));
     const vue = $('#vue');
     vue.scrollTop = 0;
     try {

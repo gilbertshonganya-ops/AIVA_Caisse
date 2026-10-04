@@ -99,6 +99,7 @@ const VueDettes = {
       if (await confirmer('Supprimer le client', msg, 'Supprimer', true)) {
         for (const m of histo) await DB.supprimer('dettes', m.id);
         await DB.supprimer('clients', client.id);
+        Audit.log('client_supprime', { nom: client.nom, soldeUSD: arrondi(solde, 2) });
         f.fermer(); toast('Client supprimé'); App.rafraichir();
       }
     });
@@ -136,6 +137,7 @@ const VueDettes = {
         clientId: client.id, date: Date.now(), type: 'paiement', montantUSD: Math.min(usd, solde),
         mode: $('#mMode', f.el).value, devise: etat.devise, note: $('#mNote', f.el).value.trim()
       });
+      Audit.log('paiement_dette', { client: client.nom, montant: arrondi(Math.min(usd, solde), 2) + ' USD' });
       f.fermer(); toast('Paiement enregistré', 'ok'); App.rafraichir();
     });
   },
@@ -153,6 +155,7 @@ const VueDettes = {
         clientId: client.id, date: Date.now(), type: 'dette', montantUSD: arrondi(versUSD(v, etat.devise, App.taux()), 6),
         devise: etat.devise, note: $('#mNote', f.el).value.trim()
       });
+      Audit.log('dette_ajoutee', { client: client.nom, montant: arrondi(versUSD(v, etat.devise, App.taux()), 2) + ' USD' });
       f.fermer(); toast('Dette enregistrée', 'ok'); App.rafraichir();
     });
   }

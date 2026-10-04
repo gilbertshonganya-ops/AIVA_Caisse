@@ -2,13 +2,15 @@
    Met en cache tous les fichiers de l'application pour qu'elle marche SANS Internet.
    IMPORTANT : quand vous modifiez un fichier, changez le numéro de VERSION ci-dessous
    pour que les téléphones téléchargent la nouvelle version. */
-const VERSION = 'aiva-caisse-v1.0.0';
+const VERSION = 'aiva-caisse-v1.1.0';
 const FICHIERS = [
   './', './index.html', './manifest.webmanifest',
   './css/style.css',
-  './js/utils.js', './js/db.js', './js/scanner.js', './js/demo.js',
-  './js/vue-caisse.js', './js/vue-stock.js', './js/vue-dettes.js',
-  './js/vue-rapports.js', './js/vue-reglages.js', './js/app.js',
+  './js/utils.js', './js/db.js', './js/audit.js', './js/pdf.js', './js/coffre.js',
+  './js/imprimante.js', './js/scanner.js', './js/demo.js',
+  './js/vue-caisse.js', './js/vue-stock.js', './js/vue-dettes.js', './js/vue-depenses.js',
+  './js/vue-achats.js', './js/vue-import.js', './js/vue-audit.js', './js/vue-rapports.js',
+  './js/vue-plus.js', './js/vue-reglages.js', './js/app.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
   './icons/apple-touch-icon.png'
 ];

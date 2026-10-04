@@ -115,7 +115,12 @@ const VueCaisse = {
       ligne = {
         produitId: p.id, nom: p.nom, qte: 0, stock: p.stock,
         prixUSD: versUSD(p.prixVente, p.devise, App.taux()),
-        coutUSD: versUSD(p.prixAchat || 0, p.devise, App.taux())
+        coutUSD: versUSD(p.prixAchat || 0, p.devise, App.taux()),
+        // Tarifs de gros et de carton (facultatifs, définis dans la fiche produit)
+        prixGrosUSD: p.prixGros != null ? versUSD(p.prixGros, p.devise, App.taux()) : null,
+        seuilGros: p.seuilGros || 0,
+        cartonQte: p.cartonQte || 0,
+        prixCartonUSD: p.prixCarton != null ? versUSD(p.prixCarton, p.devise, App.taux()) : null
       };
       this.panier.push(ligne);
     }
@@ -145,7 +150,7 @@ const VueCaisse = {
     }
   },
 
-  totalUSD() { return arrondi(this.panier.reduce((s, l) => s + l.qte * l.prixUSD, 0), 6); },
+  totalUSD() { return arrondi(this.panier.reduce((s, l) => s + totalLigne(l), 0), 6); },
   nbArticles() { return this.panier.reduce((s, l) => s + l.qte, 0); },
 
   dessinerBarrePanier() {
@@ -164,11 +169,12 @@ const VueCaisse = {
       if (!this.panier.length) { f.fermer(); this.dessinerGrille(); this.dessinerBarrePanier(); return; }
       corps.innerHTML = this.panier.map((l, i) =>
         '<div class="ligne-panier"><div class="info"><div class="nom">' + esc(l.nom) + '</div>' +
-        '<div class="petit">' + formatUSD(l.prixUSD) + ' l\'unité</div></div>' +
+        '<div class="petit">' + descriptionTarif(l) + '</div>' +
+        (l.cartonQte >= 2 ? '<button class="btn gris petit-btn" data-carton="' + i + '" style="margin-top:6px;padding:6px 10px">+ 1 carton (' + l.cartonQte + ')</button>' : '') + '</div>' +
         '<div class="qte-ctrl"><button data-moins="' + i + '">&minus;</button>' +
         '<input data-qte="' + i + '" inputmode="decimal" value="' + formatQuantite(l.qte).replace(/\s/g, '') + '">' +
         '<button data-plus="' + i + '">+</button></div>' +
-        '<div class="droite gras" style="min-width:74px">' + formatUSD(l.qte * l.prixUSD) + '</div></div>'
+        '<div class="droite gras" style="min-width:74px">' + formatUSD(totalLigne(l)) + '</div></div>'
       ).join('') +
       '<div class="ligne-flex" style="margin:14px 0 4px"><span>Total à payer</span><span class="total-grand">' + formatUSD(this.totalUSD()) + '</span></div>' +
       '<div class="droite petit" style="margin-bottom:10px">' + formatCDF(this.totalUSD() * App.taux()) + '</div>' +
@@ -184,6 +190,12 @@ const VueCaisse = {
         const l = this.panier[Number(b.dataset.plus)];
         if (l.qte + 1 > l.stock) { toast('Stock insuffisant : il reste ' + formatQuantite(l.stock), 'erreur'); return; }
         l.qte = arrondi(l.qte + 1, 3);
+        dessiner();
+      }));
+      $$('[data-carton]', corps).forEach((b) => b.addEventListener('click', () => {
+        const l = this.panier[Number(b.dataset.carton)];
+        if (l.qte + l.cartonQte > l.stock) { toast('Stock insuffisant : il reste ' + formatQuantite(l.stock), 'erreur'); return; }
+        l.qte = arrondi(l.qte + l.cartonQte, 3);
         dessiner();
       }));
       $$('[data-qte]', corps).forEach((inp) => inp.addEventListener('change', () => {
@@ -304,7 +316,7 @@ const VueCaisse = {
           date: Date.now(),
           lignes: this.panier.map((l) => ({
             produitId: l.produitId, nom: l.nom, qte: l.qte,
-            prixUnitaireUSD: arrondi(l.prixUSD, 6), prixAchatUSD: arrondi(l.coutUSD, 6)
+            prixUnitaireUSD: arrondi(totalLigne(l) / l.qte, 6), prixAchatUSD: arrondi(l.coutUSD, 6)
           })),
           totalUSD: total,
           coutUSD: arrondi(this.panier.reduce((s, l) => s + l.qte * l.coutUSD, 0), 6),
@@ -319,6 +331,7 @@ const VueCaisse = {
           annulee: false
         };
         const enregistree = await DB.enregistrerVente(vente);
+        Audit.log('vente', { id: enregistree.id, total: arrondi(total, 2) + ' USD', mode: etat.mode, reste: arrondi(c.reste, 2) + ' USD' });
         this.panier = [];
         f.fermer();
         this.produits = await DB.tout('produits');
@@ -339,9 +352,11 @@ const VueCaisse = {
       '<div class="recu">' + esc(texte.replace(/\*/g, '')) + '</div>' +
       '<div class="pile">' +
         '<button class="btn" id="recuWa">Envoyer le reçu sur WhatsApp</button>' +
+        '<button class="btn contour" id="recuImp">Imprimer le ticket</button>' +
         '<button class="btn gris" id="recuOk">Nouvelle vente</button>' +
       '</div>');
     $('#recuWa', f.el).addEventListener('click', () => ouvrirLien(lienWhatsApp(client ? client.tel : '', texte)));
+    $('#recuImp', f.el).addEventListener('click', () => Imprimante.imprimerVente(vente, client));
     $('#recuOk', f.el).addEventListener('click', () => f.fermer());
   }
 };

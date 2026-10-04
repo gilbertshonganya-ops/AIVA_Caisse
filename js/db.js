@@ -1,35 +1,51 @@
 /* AIVA Caisse - base de données locale (IndexedDB)
    Tout est stocké dans le téléphone. Aucune donnée n'est envoyée sur Internet.
 
+   VERSION 2 (v1.1) : ajout des tables fournisseurs, achats, dettesFournisseurs, depenses, audit.
+   Les données de la version 1 sont conservées automatiquement (migration).
+
    Tables ("stores") :
-   - produits    : nom, codeBarres, categorie, devise, prixAchat, prixVente, stock, seuil
-   - ventes      : date, lignes[], totalUSD, coutUSD, taux, mode, reference, clientId, payeUSD, resteUSD, vendeur, annulee
-   - clients     : nom, tel
-   - dettes      : clientId, date, type ('dette' | 'paiement'), montantUSD, mode, note, venteId
-   - mouvements  : produitId, date, type ('entree' | 'sortie' | 'vente' | 'inventaire' | 'annulation'), qte (+/-), note
-   - params      : cle / valeur (réglages)
+   - produits, ventes, clients, dettes, mouvements, params   (version 1)
+   - fournisseurs        : nom, tel
+   - achats              : date, fournisseurId, lignes[], totalUSD, payeUSD, resteUSD, note
+   - dettesFournisseurs  : fournisseurId, date, type ('dette' | 'paiement'), montantUSD, achatId
+   - depenses            : date, categorie, montantUSD, note
+   - audit               : journal infalsifiable (chaîne de hachage SHA-256), voir audit.js
 */
 const DB = (() => {
   const NOM = 'aiva-caisse';
-  const VERSION = 1;
-  const TABLES = ['produits', 'ventes', 'clients', 'dettes', 'mouvements', 'params'];
+  const VERSION = 2;
+  const TABLES = ['produits', 'ventes', 'clients', 'dettes', 'mouvements', 'params',
+                  'fournisseurs', 'achats', 'dettesFournisseurs', 'depenses', 'audit'];
+  // Tables ajoutées en version 2 : une ancienne sauvegarde (v1) ne doit pas les vider
+  const TABLES_V2 = ['fournisseurs', 'achats', 'dettesFournisseurs', 'depenses', 'audit'];
   let base = null;
 
   function ouvrir() {
     return new Promise((resolve, reject) => {
       if (!window.indexedDB) { reject(new Error('IndexedDB non disponible sur ce téléphone')); return; }
       const rq = indexedDB.open(NOM, VERSION);
-      rq.onupgradeneeded = () => {
+      rq.onupgradeneeded = (e) => {
         const d = rq.result;
-        d.createObjectStore('produits', { keyPath: 'id', autoIncrement: true }).createIndex('codeBarres', 'codeBarres');
-        d.createObjectStore('ventes', { keyPath: 'id', autoIncrement: true }).createIndex('date', 'date');
-        d.createObjectStore('clients', { keyPath: 'id', autoIncrement: true });
-        d.createObjectStore('dettes', { keyPath: 'id', autoIncrement: true }).createIndex('clientId', 'clientId');
-        d.createObjectStore('mouvements', { keyPath: 'id', autoIncrement: true }).createIndex('produitId', 'produitId');
-        d.createObjectStore('params', { keyPath: 'cle' });
+        if (e.oldVersion < 1) {
+          d.createObjectStore('produits', { keyPath: 'id', autoIncrement: true }).createIndex('codeBarres', 'codeBarres');
+          d.createObjectStore('ventes', { keyPath: 'id', autoIncrement: true }).createIndex('date', 'date');
+          d.createObjectStore('clients', { keyPath: 'id', autoIncrement: true });
+          d.createObjectStore('dettes', { keyPath: 'id', autoIncrement: true }).createIndex('clientId', 'clientId');
+          d.createObjectStore('mouvements', { keyPath: 'id', autoIncrement: true }).createIndex('produitId', 'produitId');
+          d.createObjectStore('params', { keyPath: 'cle' });
+        }
+        if (e.oldVersion < 2) {
+          d.createObjectStore('fournisseurs', { keyPath: 'id', autoIncrement: true });
+          d.createObjectStore('achats', { keyPath: 'id', autoIncrement: true }).createIndex('date', 'date');
+          d.createObjectStore('dettesFournisseurs', { keyPath: 'id', autoIncrement: true }).createIndex('fournisseurId', 'fournisseurId');
+          d.createObjectStore('depenses', { keyPath: 'id', autoIncrement: true }).createIndex('date', 'date');
+          d.createObjectStore('audit', { keyPath: 'id', autoIncrement: true });
+        }
       };
       rq.onsuccess = () => { base = rq.result; resolve(base); };
       rq.onerror = () => reject(rq.error);
+      rq.onblocked = () => reject(new Error('Fermez les autres onglets de AIVA Caisse puis rechargez'));
     });
   }
 
@@ -51,7 +67,7 @@ const DB = (() => {
   }
   const ecrireParam = (cle, valeur) => ecrire('params', { cle, valeur });
 
-  // Termine une transaction : résout au "complete", rejette à l'"abort"
+  // Transaction "tout ou rien" : résout au "complete", rejette à l'"abort"
   function transaction(tables, travail) {
     return new Promise((resolve, reject) => {
       const t = base.transaction(tables, 'readwrite');
@@ -63,22 +79,30 @@ const DB = (() => {
     });
   }
 
+  // Total d'unités de stock demandées par produit (une ligne "carton" compte qte x facteur)
+  function besoinsParProduit(lignes) {
+    const besoins = new Map();
+    lignes.forEach((l) => besoins.set(l.produitId, arrondi((besoins.get(l.produitId) || 0) + l.qte * (l.facteur || 1), 3)));
+    return besoins;
+  }
+
   // ----- Enregistrer une vente : tout ou rien (stock, mouvements, vente, dette) -----
   function enregistrerVente(vente) {
     return transaction(['produits', 'ventes', 'mouvements', 'dettes'], (t, ctx, echec) => {
       if (!vente.lignes.length) { echec('Le panier est vide'); return; }
       const sp = t.objectStore('produits');
-      let restants = vente.lignes.length;
-      vente.lignes.forEach((l) => {
-        const rq = sp.get(l.produitId);
+      const besoins = besoinsParProduit(vente.lignes);
+      let restants = besoins.size;
+      besoins.forEach((unites, produitId) => {
+        const rq = sp.get(produitId);
         rq.onsuccess = () => {
           const p = rq.result;
-          if (!p) { echec('Produit introuvable : ' + l.nom); return; }
-          if (p.stock < l.qte) { echec('Stock insuffisant pour « ' + p.nom + ' » (reste ' + formatQuantite(p.stock) + ')'); return; }
-          p.stock = arrondi(p.stock - l.qte, 3);
+          if (!p) { echec('Produit introuvable (supprimé ?)'); return; }
+          if (p.stock < unites) { echec('Stock insuffisant pour « ' + p.nom + ' » (reste ' + formatQuantite(p.stock) + ')'); return; }
+          p.stock = arrondi(p.stock - unites, 3);
           sp.put(p);
           t.objectStore('mouvements').add({
-            produitId: p.id, nom: p.nom, date: vente.date, type: 'vente', qte: -l.qte, note: 'Vente', vendeur: vente.vendeur
+            produitId: p.id, nom: p.nom, date: vente.date, type: 'vente', qte: -unites, note: 'Vente', vendeur: vente.vendeur
           });
           restants -= 1;
           if (restants === 0) {
@@ -112,15 +136,15 @@ const DB = (() => {
         v.dateAnnulation = Date.now();
         sv.put(v);
         const sp = t.objectStore('produits');
-        v.lignes.forEach((l) => {
-          const rp = sp.get(l.produitId);
+        besoinsParProduit(v.lignes).forEach((unites, produitId) => {
+          const rp = sp.get(produitId);
           rp.onsuccess = () => {
             const p = rp.result;
             if (!p) return; // produit supprimé depuis : rien à remettre
-            p.stock = arrondi(p.stock + l.qte, 3);
+            p.stock = arrondi(p.stock + unites, 3);
             sp.put(p);
             t.objectStore('mouvements').add({
-              produitId: p.id, nom: p.nom, date: Date.now(), type: 'annulation', qte: l.qte, note: 'Annulation vente n° ' + v.id
+              produitId: p.id, nom: p.nom, date: Date.now(), type: 'annulation', qte: unites, note: 'Annulation vente n° ' + v.id
             });
           };
         });
@@ -154,14 +178,75 @@ const DB = (() => {
     });
   }
 
+  // ----- Enregistrer un achat fournisseur : stock + prix d'achat + dette fournisseur -----
+  // achat.lignes[i] = { produitId, nom, qte, prixSaisi (dans la devise du produit), devise, prixUnitaireUSD }
+  // achat.majPrix : si vrai, le prix d'achat du produit devient le prix saisi
+  function enregistrerAchat(achat) {
+    return transaction(['produits', 'achats', 'mouvements', 'dettesFournisseurs'], (t, ctx, echec) => {
+      if (!achat.lignes.length) { echec('Aucun produit dans l\'achat'); return; }
+      const ids = achat.lignes.map((l) => l.produitId);
+      if (new Set(ids).size !== ids.length) { echec('Un produit apparaît deux fois dans l\'achat'); return; }
+      const sp = t.objectStore('produits');
+      let restants = achat.lignes.length;
+      achat.lignes.forEach((l) => {
+        const rq = sp.get(l.produitId);
+        rq.onsuccess = () => {
+          const p = rq.result;
+          if (!p) { echec('Produit introuvable : ' + l.nom); return; }
+          if (achat.majPrix) p.prixAchat = l.prixSaisi;
+          p.stock = arrondi(p.stock + l.qte, 3);
+          sp.put(p);
+          t.objectStore('mouvements').add({
+            produitId: p.id, nom: p.nom, date: achat.date, type: 'entree', qte: l.qte, note: 'Achat fournisseur', vendeur: achat.vendeur
+          });
+          restants -= 1;
+          if (restants === 0) {
+            const ra = t.objectStore('achats').add(achat);
+            ra.onsuccess = () => {
+              achat.id = ra.result;
+              ctx.resultat = achat;
+              if (achat.resteUSD > 0.0001) {
+                t.objectStore('dettesFournisseurs').add({
+                  fournisseurId: achat.fournisseurId, date: achat.date, type: 'dette',
+                  montantUSD: achat.resteUSD, note: 'Achat n° ' + achat.id, achatId: achat.id
+                });
+              }
+            };
+          }
+        };
+      });
+    });
+  }
+
+  // ----- Import de produits en lot (CSV) : tout ou rien -----
+  // nouveaux : produits sans id (leur stock de départ est journalisé) ; misesAJour : produits avec id
+  function importerProduits(nouveaux, misesAJour, auteur) {
+    return transaction(['produits', 'mouvements'], (t, ctx) => {
+      const sp = t.objectStore('produits');
+      (misesAJour || []).forEach((p) => sp.put(p));
+      (nouveaux || []).forEach((p) => {
+        const rq = sp.add(p);
+        rq.onsuccess = () => {
+          if (p.stock > 0) {
+            t.objectStore('mouvements').add({
+              produitId: rq.result, nom: p.nom, date: Date.now(), type: 'entree', qte: p.stock, note: 'Stock de départ (import)', vendeur: auteur || ''
+            });
+          }
+        };
+      });
+      ctx.resultat = (nouveaux || []).length + (misesAJour || []).length;
+    });
+  }
+
   // ----- Sauvegarde complète -----
   async function exporterTout() {
     const donnees = {};
     for (const t of TABLES) donnees[t] = await tout(t);
-    return { application: 'AIVA Caisse', version: 1, date: Date.now(), donnees };
+    return { application: 'AIVA Caisse', version: 2, date: Date.now(), donnees };
   }
 
-  // Remplace TOUTES les données par celles d'une sauvegarde (ou des données de démo)
+  // Remplace TOUTES les données par celles d'une sauvegarde (ou des données de démo).
+  // Une sauvegarde de la version 1 ne touche pas aux tables de la version 2 (elles n'y existent pas).
   function importerTout(sauvegarde) {
     return new Promise((resolve, reject) => {
       if (!sauvegarde || sauvegarde.application !== 'AIVA Caisse' || !sauvegarde.donnees) {
@@ -171,22 +256,26 @@ const DB = (() => {
       t.oncomplete = () => resolve();
       t.onabort = () => reject(t.error || new Error('Importation annulée'));
       TABLES.forEach((nom) => {
+        const lignes = sauvegarde.donnees[nom];
+        if (lignes === undefined && TABLES_V2.includes(nom)) return; // table absente d'une vieille sauvegarde : on garde l'existant
         const s = t.objectStore(nom);
         s.clear();
-        (sauvegarde.donnees[nom] || []).forEach((ligne) => s.put(ligne));
+        (lignes || []).forEach((ligne) => s.put(ligne));
       });
     });
   }
 
-  function toutEffacer() {
+  // Efface les tables, sauf celles de la liste "gardees" (ex. ['params', 'audit'] : réglages, PIN, journal).
+  function toutEffacer(gardees = []) {
     return new Promise((resolve, reject) => {
       const t = base.transaction(TABLES, 'readwrite');
       t.oncomplete = () => resolve();
       t.onabort = () => reject(t.error);
-      TABLES.forEach((nom) => t.objectStore(nom).clear());
+      TABLES.filter((n) => !gardees.includes(n)).forEach((nom) => t.objectStore(nom).clear());
     });
   }
 
-  return { ouvrir, tout, lire, ecrire, ajouter, supprimer, lireParam, ecrireParam,
-           enregistrerVente, annulerVente, ajusterStock, exporterTout, importerTout, toutEffacer };
+  return { ouvrir, tout, lire, ecrire, ajouter, supprimer, lireParam, ecrireParam, transaction,
+           enregistrerVente, annulerVente, ajusterStock, enregistrerAchat, importerProduits,
+           exporterTout, importerTout, toutEffacer };
 })();

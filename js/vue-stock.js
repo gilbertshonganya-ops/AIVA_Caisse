@@ -77,6 +77,8 @@ const VueStock = {
           ? '<div class="ligne"><span>Prix d\'achat</span><span>' + prixProduit(p, 'prixAchat') + '</span></div>' +
             '<div class="ligne"><span>Bénéfice par unité</span><span class="vert-txt gras">' + formatUSD(marge) + '</span></div>'
           : '') +
+        (p.prixGros != null ? '<div class="ligne"><span>Prix de gros (dès ' + formatQuantite(p.seuilGros) + ')</span><span class="gras">' + prixProduit(p, 'prixGros') + '</span></div>' : '') +
+        (p.cartonQte ? '<div class="ligne"><span>Carton de ' + p.cartonQte + '</span><span class="gras">' + (p.prixCarton != null ? prixProduit(p, 'prixCarton') : 'au prix normal') + '</span></div>' : '') +
         '<div class="ligne"><span>Code-barres</span><span>' + esc(p.codeBarres || '-') + '</span></div>' +
         '<div class="ligne"><span>Catégorie</span><span>' + esc(p.categorie || '-') + '</span></div>' +
       '</div>' +
@@ -98,6 +100,7 @@ const VueStock = {
       $('#bSuppr', f.el).addEventListener('click', async () => {
         if (await confirmer('Supprimer le produit', 'Supprimer « ' + p.nom + ' » ? Les anciennes ventes restent dans les rapports.', 'Supprimer', true)) {
           await DB.supprimer('produits', p.id);
+          Audit.log('produit_supprime', { nom: p.nom, stock: p.stock });
           f.fermer(); toast('Produit supprimé'); App.rafraichir();
         }
       });
@@ -123,6 +126,7 @@ const VueStock = {
       if (!entree && q > p.stock) { toast('Impossible : il ne reste que ' + formatQuantite(p.stock), 'erreur'); return; }
       try {
         await DB.ajusterStock(p.id, entree ? q : -q, type, $('#mNote', f.el).value.trim(), App.nomVendeur());
+        Audit.log(entree ? 'stock_entree' : 'stock_sortie', { produit: p.nom, qte: q, note: $('#mNote', f.el).value.trim() });
         f.fermer(); toast(entree ? 'Entrée enregistrée' : 'Sortie enregistrée', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }
     });
@@ -142,6 +146,15 @@ const VueStock = {
         '<label class="champ"><span>Prix d\'achat</span><input id="fAchat" inputmode="decimal" autocomplete="off" value="' + esc(p.prixAchat) + '"></label>' +
         '<label class="champ"><span>Prix de vente *</span><input id="fVente" inputmode="decimal" autocomplete="off" value="' + esc(p.prixVente) + '"></label>' +
       '</div>' +
+      '<details class="options"' + ((p.prixGros != null || p.cartonQte) ? ' open' : '') + '><summary>Prix de gros et cartons (facultatif)</summary>' +
+        '<p class="petit">Le prix de gros s\'applique tout seul quand le client prend assez d\'unités. Le carton se vend en un clic dans le panier.</p>' +
+        '<div class="deux-colonnes">' +
+          '<label class="champ"><span>Prix de gros (par unité)</span><input id="fGros" inputmode="decimal" autocomplete="off" value="' + esc(p.prixGros == null ? '' : p.prixGros) + '"></label>' +
+          '<label class="champ"><span>à partir de (unités)</span><input id="fSeuilGros" inputmode="decimal" autocomplete="off" value="' + esc(p.seuilGros == null ? '' : p.seuilGros) + '"></label>' +
+        '</div><div class="deux-colonnes">' +
+          '<label class="champ"><span>Unités par carton</span><input id="fCartonQte" inputmode="numeric" autocomplete="off" value="' + esc(p.cartonQte == null ? '' : p.cartonQte) + '"></label>' +
+          '<label class="champ"><span>Prix du carton</span><input id="fCartonPrix" inputmode="decimal" autocomplete="off" value="' + esc(p.prixCarton == null ? '' : p.prixCarton) + '"></label>' +
+        '</div></details>' +
       '<div class="deux-colonnes">' +
         (nouveau ? '<label class="champ"><span>Stock de départ</span><input id="fStock" inputmode="decimal" autocomplete="off" value="0"></label>' : '<div class="champ"><span>Stock actuel</span><div class="gras" style="padding:12px 0">' + formatQuantite(p.stock) + '</div></div>') +
         '<label class="champ"><span>Alerte quand il reste</span><input id="fSeuil" inputmode="decimal" autocomplete="off" value="' + esc(p.seuil) + '"></label>' +
@@ -164,14 +177,29 @@ const VueStock = {
       if (isNaN(achat) || achat < 0) { toast('Le prix d\'achat est invalide', 'erreur'); return; }
       if (isNaN(seuil) || seuil < 0) { toast('Le seuil d\'alerte est invalide', 'erreur'); return; }
       if (isNaN(stockDepart) || stockDepart < 0) { toast('Le stock ne peut pas être négatif', 'erreur'); return; }
+      const lireOpt = (id) => { const v = $(id, f.el).value.trim(); return v === '' ? null : lireNombre(v); };
+      const gros = lireOpt('#fGros'), seuilGros = lireOpt('#fSeuilGros'), cartonQte = lireOpt('#fCartonQte'), prixCarton = lireOpt('#fCartonPrix');
+      if (gros !== null && (isNaN(gros) || gros < 0)) { toast('Le prix de gros est invalide', 'erreur'); return; }
+      if (gros !== null && (seuilGros === null || isNaN(seuilGros) || seuilGros < 2)) { toast('Indiquez à partir de combien d\'unités le prix de gros s\'applique (2 ou plus)', 'erreur'); return; }
+      if (cartonQte !== null && (isNaN(cartonQte) || cartonQte < 2 || !Number.isInteger(cartonQte))) { toast('Un carton contient au moins 2 unités (nombre entier)', 'erreur'); return; }
+      if (prixCarton !== null && (isNaN(prixCarton) || prixCarton < 0)) { toast('Le prix du carton est invalide', 'erreur'); return; }
+      if (prixCarton !== null && cartonQte === null) { toast('Indiquez combien d\'unités contient un carton', 'erreur'); return; }
       if (code && this.produits.some((x) => x.codeBarres === code && x.id !== p.id)) { toast('Ce code-barres existe déjà pour un autre produit', 'erreur'); return; }
       if (achat > vente && !(await confirmer('Prix à vérifier', 'Le prix d\'achat est plus grand que le prix de vente : vous vendriez à perte. Continuer ?', 'Continuer'))) return;
       const objet = Object.assign({}, p, {
         nom, categorie: $('#fCat', f.el).value.trim(), codeBarres: code, devise: $('#fDev', f.el).value,
-        prixAchat: achat, prixVente: vente, seuil, stock: arrondi(stockDepart, 3)
+        prixAchat: achat, prixVente: vente, seuil, stock: arrondi(stockDepart, 3),
+        prixGros: gros, seuilGros: gros !== null ? seuilGros : null, cartonQte, prixCarton
       });
       try {
         const id = await DB.ecrire('produits', objet);
+        if (nouveau) Audit.log('produit_cree', { nom, prixVente: vente + ' ' + objet.devise, stock: stockDepart });
+        else {
+          const diff = {};
+          [['nom', 'nom'], ['prixVente', 'prix de vente'], ['prixAchat', 'prix d\'achat'], ['prixGros', 'prix de gros'], ['prixCarton', 'prix du carton'], ['seuil', 'seuil'], ['devise', 'devise']]
+            .forEach(([k, lib]) => { if ((p[k] == null ? null : p[k]) !== (objet[k] == null ? null : objet[k])) diff[lib] = [p[k] == null ? '-' : p[k], objet[k] == null ? '-' : objet[k]]; });
+          if (Object.keys(diff).length) Audit.log('produit_modifie', Object.assign({ produit: nom }, diff));
+        }
         if (nouveau && stockDepart > 0) {
           await DB.ajouter('mouvements', { produitId: id, nom, date: Date.now(), type: 'entree', qte: arrondi(stockDepart, 3), note: 'Stock de départ', vendeur: App.nomVendeur() });
         }
@@ -202,6 +230,7 @@ const VueStock = {
       if (!(await confirmer('Confirmer', changements.length + ' produit(s) seront corrigés. Continuer ?', 'Appliquer'))) return;
       try {
         for (const c of changements) await DB.ajusterStock(c.p.id, c.delta, 'inventaire', 'Inventaire', App.nomVendeur());
+        Audit.log('inventaire', { corrections: changements.length, details: changements.slice(0, 20).map((c) => c.p.nom + ' ' + (c.delta > 0 ? '+' : '') + formatQuantite(c.delta)).join(', ') });
         f.fermer(); toast(changements.length + ' produit(s) corrigé(s)', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }
     });
