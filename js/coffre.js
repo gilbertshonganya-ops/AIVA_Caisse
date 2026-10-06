@@ -1,4 +1,4 @@
-/* AIVA Caisse - chiffrement des sauvegardes avec un mot de passe
+/* EvoBuskin - chiffrement des sauvegardes avec un mot de passe
    AES-256-GCM, clé dérivée du mot de passe par PBKDF2 (200 000 tours). Utilise l'API du navigateur
    (Web Crypto), qui exige une adresse sécurisée : HTTPS ou localhost.
    ATTENTION : sans le mot de passe, la sauvegarde est impossible à rouvrir (même pour nous). */
@@ -31,7 +31,7 @@ const Coffre = (() => {
     const cle = await deriverCle(motDePasse, sel, TOURS);
     const chiffre = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cle, new TextEncoder().encode(texte));
     return {
-      application: 'AIVA Caisse', chiffre: true, version: 1, kdf: 'PBKDF2-SHA256', tours: TOURS,
+      application: 'EvoBuskin', chiffre: true, version: 1, kdf: 'PBKDF2-SHA256', tours: TOURS,
       sel: enB64(sel), iv: enB64(iv), donnees: enB64(new Uint8Array(chiffre))
     };
   }

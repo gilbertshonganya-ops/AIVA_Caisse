@@ -1,28 +1,23 @@
-/* AIVA Caisse - écran RAPPORTS (patron) : ventes, bénéfices, dépenses, rapport PDF */
+/* EvoBuskin - écran RAPPORTS (patron) : ventes, bénéfices, dépenses, rapport PDF */
 const VueRapports = {
-  periode: 'jour', // 'jour' | 'semaine' | 'mois'
+  periode: Periode.nouveau('jour'), // période choisie : jour, semaine, mois, année, toutes les dates ou dates libres
+  limiteVentes: 15,
 
-  debut() { return { jour: debutJour, semaine: debutSemaine, mois: debutMois }[this.periode](); },
-  libellePeriode() {
-    const d = this.debut();
-    if (this.periode === 'jour') return 'Aujourd\'hui, ' + formatDate(d);
-    if (this.periode === 'semaine') return 'Semaine du ' + formatDate(d) + ' au ' + formatDate(Date.now());
-    return 'Mois de ' + new Date(d).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  },
+  libellePeriode() { return Periode.libelle(this.periode); },
 
   // Calcule tous les chiffres de la période (utilisé par l'écran ET par le PDF)
   async collecter() {
     const [ventesTout, dettes, produits, clients, depensesTout, achatsTout, dettesF, fournisseurs] = await Promise.all([
       DB.tout('ventes'), DB.tout('dettes'), DB.tout('produits'), DB.tout('clients'),
       DB.tout('depenses'), DB.tout('achats'), DB.tout('dettesFournisseurs'), DB.tout('fournisseurs')]);
-    const debut = this.debut();
+    const { debut, fin } = Periode.bornes(this.periode);
     const valides = ventesTout.filter((v) => !v.annulee);
-    const ventes = valides.filter((v) => v.date >= debut);
-    const depenses = depensesTout.filter((d) => d.date >= debut);
-    const achats = achatsTout.filter((a) => a.date >= debut);
-    const paiementsDettes = dettes.filter((d) => d.type === 'paiement' && d.date >= debut);
+    const ventes = valides.filter((v) => v.date >= debut && v.date < fin);
+    const depenses = depensesTout.filter((d) => d.date >= debut && d.date < fin);
+    const achats = achatsTout.filter((a) => a.date >= debut && a.date < fin);
+    const paiementsDettes = dettes.filter((d) => d.type === 'paiement' && d.date >= debut && d.date < fin);
 
-    const d = { debut, ventesTout, valides, ventes, depenses, achats, produits };
+    const d = { debut, fin, ventesTout, valides, ventes, depenses, achats, produits };
     d.ca = ventes.reduce((s, v) => s + v.totalUSD, 0);
     d.cout = ventes.reduce((s, v) => s + (v.coutUSD || 0), 0);
     d.beneficeBrut = d.ca - d.cout;
@@ -53,24 +48,55 @@ const VueRapports = {
     return d;
   },
 
+  // Données du graphique : par jour (jusqu'à 31 jours), par mois au-delà, ou les 7 derniers jours pour une courte période.
+  serieGraphique(d) {
+    let fin = Math.min(d.fin - 1, Date.now());                 // dernier instant utile (pas dans le futur)
+    let debut = d.debut;
+    if (!(debut > 0)) debut = d.valides.length ? Math.min.apply(null, d.valides.map((v) => v.date)) : fin; // "toutes les dates" : dès la 1re vente
+    if (fin < debut) fin = debut;
+    const j0 = debutJour(debut), j1 = debutJour(fin);
+    const nbJours = Math.round((j1 - j0) / 86400000) + 1;
+    const somme = (liste, a, b) => liste.filter((v) => v.date >= a && v.date < b).reduce((s, v) => s + v.totalUSD, 0);
+    const plus1 = (t) => { const x = new Date(t); x.setDate(x.getDate() + 1); return x.getTime(); };
+    const serie = [];
+    if (nbJours < 7) { // période courte : on montre les 7 derniers jours pour garder un repère
+      for (let k = 6; k >= 0; k--) {
+        const x = new Date(j1); x.setDate(x.getDate() - k);
+        serie.push({ lib: x.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3), total: somme(d.valides, x.getTime(), plus1(x.getTime())) });
+      }
+      return { titre: '7 derniers jours', serie };
+    }
+    if (nbJours <= 31) {
+      for (let k = 0; k < nbJours; k++) {
+        const x = new Date(j0); x.setDate(x.getDate() + k);
+        serie.push({ lib: nbJours <= 10 ? x.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3) : String(x.getDate()), total: somme(d.ventes, x.getTime(), plus1(x.getTime())) });
+      }
+      return { titre: 'Ventes par jour', serie };
+    }
+    const m0 = new Date(j0); m0.setDate(1);
+    const mois = [];
+    for (let m = new Date(m0); m.getTime() <= j1; m.setMonth(m.getMonth() + 1)) mois.push(new Date(m));
+    mois.slice(-24).forEach((m) => {
+      const suivant = new Date(m); suivant.setMonth(suivant.getMonth() + 1);
+      serie.push({ lib: m.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '') + ' ' + String(m.getFullYear()).slice(2), total: somme(d.ventes, m.getTime(), suivant.getTime()) });
+    });
+    return { titre: 'Ventes par mois', serie };
+  },
+
   async afficher(conteneur) {
     const d = await this.collecter();
-    const jours = [];
-    for (let i = 6; i >= 0; i--) {
-      const dt = new Date(); dt.setDate(dt.getDate() - i);
-      const dj = debutJour(dt);
-      jours.push({ lib: dt.toLocaleDateString('fr-FR', { weekday: 'short' }).slice(0, 3), total: d.valides.filter((v) => v.date >= dj && v.date < dj + 86400000).reduce((s, v) => s + v.totalUSD, 0) });
-    }
-    const maxJour = Math.max(...jours.map((j) => j.total), 0.01);
+    const graph = this.serieGraphique(d);
+    const maxJour = Math.max(...graph.serie.map((j) => j.total), 0.01);
     const top = d.top.slice(0, 5), maxQte = top.length ? top[0].qte : 1;
     const modes = Object.keys(d.parMode).sort((a, b) => d.parMode[b] - d.parMode[a]);
-    const dernieres = d.ventesTout.filter((v) => v.date >= d.debut).sort((a, b) => b.date - a.date).slice(0, 12);
+    const toutesLesVentes = d.ventesTout.filter((v) => v.date >= d.debut && v.date < d.fin).sort((a, b) => b.date - a.date);
+    const dernieres = toutesLesVentes.slice(0, this.limiteVentes);
     const t = App.taux();
     const stat = (cls, lib, usd, sous) => '<div class="stat ' + cls + '"><div class="lib">' + lib + '</div><div class="val">' + formatUSD(usd) + '</div><div class="val2">' + (sous || formatCDF(usd * t)) + '</div></div>';
 
     conteneur.innerHTML =
       (await App.bandeaux()) +
-      '<div class="segment" id="periodes"><button data-p="jour">Aujourd\'hui</button><button data-p="semaine">Cette semaine</button><button data-p="mois">Ce mois</button></div>' +
+      Periode.html(this.periode) +
       '<div class="stats">' +
         stat('', 'Ventes', d.ca) +
         stat('', 'Bénéfice sur ventes', d.beneficeBrut) +
@@ -86,26 +112,27 @@ const VueRapports = {
       '<p class="petit" style="margin:-4px 2px 12px">Bénéfice net = ventes − coût des marchandises vendues − dépenses.</p>' +
       '<button class="btn contour" id="btnPdf" style="margin-bottom:12px">Télécharger le rapport PDF</button>' +
       (d.stockBas.length ? '<div class="carte alerte ligne-flex" id="versStock" style="cursor:pointer"><span><b>' + d.stockBas.length + '</b> produit(s) en rupture ou stock bas</span><span>&rsaquo;</span></div>' : '') +
-      '<div class="carte"><h3>7 derniers jours</h3><div class="graphique">' + jours.map((j) =>
-        '<div class="col"><div class="petit" style="font-size:.65rem">' + (j.total > 0 ? Math.round(j.total) : '') + '</div><div class="barre-g" style="height:' + Math.max(2, Math.round(j.total / maxJour * 90)) + '%"></div><div class="lib-g">' + j.lib + '</div></div>').join('') + '</div></div>' +
+      '<div class="carte"><h3>' + graph.titre + '</h3><div class="graphique">' + graph.serie.map((j) =>
+        '<div class="col"><div class="petit" style="font-size:.65rem">' + (j.total > 0 ? Math.round(j.total) : '') + '</div><div class="barre-g" style="height:' + Math.max(2, Math.round(j.total / maxJour * 90)) + '%"></div><div class="lib-g">' + esc(j.lib) + '</div></div>').join('') + '</div></div>' +
       '<div class="carte"><h3>Produits les plus vendus</h3>' + (top.length ? top.map((x) =>
         '<div style="margin-top:10px"><div class="ligne-flex"><span>' + esc(x.nom) + '</span><span class="gras">' + formatQuantite(x.qte) + ' vendu(s)</span></div>' +
         '<div class="barre-h"><i style="width:' + Math.round(x.qte / maxQte * 100) + '%"></i></div><div class="petit">' + formatUSD(x.total) + '</div></div>').join('') : '<p class="petit">Aucune vente sur cette période.</p>') + '</div>' +
       '<div class="carte"><h3>Par moyen de paiement</h3>' + (modes.length ? modes.map((m) =>
         '<div class="ligne-flex" style="margin-top:8px"><span>' + (LIBELLES_MODE[m] || m) + '</span><span class="gras">' + formatUSD(d.parMode[m]) + '</span></div>').join('') : '<p class="petit">Rien à afficher.</p>') + '</div>' +
-      '<h3 style="margin:6px 0 8px">Dernières ventes</h3>' +
+      '<h3 style="margin:6px 0 8px">Ventes de la période (' + toutesLesVentes.length + ')</h3>' +
       (dernieres.length ? '<div class="liste">' + dernieres.map((v) =>
         '<div class="ligne" data-id="' + v.id + '"><div><div class="nom">Vente n° ' + v.id + (v.annulee ? ' <span class="badge gris">Annulée</span>' : '') + '</div>' +
         '<div class="sous">' + formatDateHeure(v.date) + ' &middot; ' + (LIBELLES_MODE[v.mode] || v.mode) + ' &middot; ' + esc(v.vendeur || '') + '</div></div>' +
-        '<div class="droite gras">' + formatUSD(v.totalUSD) + '</div></div>').join('') + '</div>' : '<div class="vide">Aucune vente sur cette période.</div>');
+        '<div class="droite gras">' + formatUSD(v.totalUSD) + '</div></div>').join('') + '</div>' : '<div class="vide">Aucune vente sur cette période.</div>') +
+      (toutesLesVentes.length > dernieres.length ? '<button class="btn gris" id="plusVentes">Voir plus de ventes (' + (toutesLesVentes.length - dernieres.length) + ' restantes)</button>' : '');
 
-    $$('#periodes button').forEach((b) => {
-      b.classList.toggle('actif', b.dataset.p === this.periode);
-      b.addEventListener('click', () => { this.periode = b.dataset.p; this.afficher(conteneur); });
-    });
+    Periode.brancher(conteneur, this.periode, () => { this.limiteVentes = 15; this.afficher(conteneur); },
+      { marques: new Set(d.valides.map((v) => Periode.iso(v.date)).concat(d.depenses.map((x) => Periode.iso(x.date)))) });
+    const plusVentes = $('#plusVentes');
+    if (plusVentes) plusVentes.addEventListener('click', () => { this.limiteVentes += 30; this.afficher(conteneur); });
     $('#btnPdf').addEventListener('click', async () => {
       try {
-        const nom = 'rapport-aiva-caisse-' + this.periode + '-' + new Date().toISOString().slice(0, 10) + '.pdf';
+        const nom = 'rapport-evobuskin-' + Periode.slug(this.periode) + '-' + new Date().toISOString().slice(0, 10) + '.pdf';
         await enregistrerFichier(nom, this.genererPdf(d), 'application/pdf');
       } catch (e) { toast('Impossible de créer le PDF : ' + e.message, 'erreur'); }
     });
@@ -125,7 +152,7 @@ const VueRapports = {
     const entete = () => {
       doc.nouvellePage();
       doc.rect(0, 0, doc.largeur, 70, VERT);
-      doc.texte(ML, 34, App.reglages.nomBoutique || 'AIVA Caisse', { taille: 18, gras: true, couleur: [255, 255, 255] });
+      doc.texte(ML, 34, App.reglages.nomBoutique || 'EvoBuskin', { taille: 18, gras: true, couleur: [255, 255, 255] });
       doc.texte(ML, 54, 'Rapport de gestion - ' + this.libellePeriode(), { taille: 10, couleur: [255, 255, 255] });
       doc.texte(doc.largeur - MR, 34, 'Taux : 1 $ = ' + formatCDF(t), { taille: 9, couleur: [255, 255, 255], align: 'right' });
       doc.texte(doc.largeur - MR, 54, 'Édité le ' + formatDateHeure(Date.now()), { taille: 9, couleur: [255, 255, 255], align: 'right' });
@@ -198,7 +225,7 @@ const VueRapports = {
 
     const n = doc.nbPages();
     for (let i = 0; i < n; i++) {
-      doc.texte(ML, doc.hauteur - 28, 'AIVA Caisse - ' + (App.reglages.nomBoutique || ''), { taille: 8, couleur: GRIS, page: i });
+      doc.texte(ML, doc.hauteur - 28, 'EvoBuskin - ' + (App.reglages.nomBoutique || ''), { taille: 8, couleur: GRIS, page: i });
       doc.texte(doc.largeur - MR, doc.hauteur - 28, 'Page ' + (i + 1) + ' / ' + n, { taille: 8, couleur: GRIS, align: 'right', page: i });
     }
     return doc.octets('Rapport ' + this.libellePeriode());
@@ -209,13 +236,15 @@ const VueRapports = {
     if (!v) return;
     const client = clients.find((c) => c.id === v.clientId);
     const texte = construireRecu(v, client);
+    const aCredit = v.resteUSD > 0.005 && !!client && !v.annulee; // WhatsApp seulement pour une vente à crédit
     const f = ouvrirFenetre('Vente n° ' + v.id,
       '<div class="recu">' + esc(texte.replace(/\*/g, '')) + '</div>' +
       '<div class="petit" style="margin-bottom:10px">Vendeur : ' + esc(v.vendeur || '-') + ' &middot; Bénéfice : ' + formatUSD(v.totalUSD - (v.coutUSD || 0)) + '</div>' +
-      '<div class="pile"><button class="btn" id="vWa">Envoyer le reçu sur WhatsApp</button><button class="btn gris" id="vImp">Imprimer le ticket</button>' +
+      '<div class="pile">' +
+      (aCredit ? '<button class="btn" id="vWa">Envoyer le reçu à ' + esc(client.nom) + ' sur WhatsApp</button>' : '') +
       (v.annulee ? '' : '<button class="btn rouge" id="vAnnuler">Annuler cette vente</button>') + '</div>');
-    $('#vWa', f.el).addEventListener('click', () => ouvrirLien(lienWhatsApp(client ? client.tel : '', texte)));
-    $('#vImp', f.el).addEventListener('click', () => Imprimante.imprimerVente(v, client));
+    const wa = $('#vWa', f.el);
+    if (wa) wa.addEventListener('click', () => ouvrirLien(lienWhatsApp(client.tel, texte)));
     const ann = $('#vAnnuler', f.el);
     if (ann) ann.addEventListener('click', async () => {
       if (!(await confirmer('Annuler la vente', 'Le stock sera remis et la dette éventuelle supprimée. Continuer ?', 'Annuler la vente', true))) return;

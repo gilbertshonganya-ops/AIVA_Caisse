@@ -1,4 +1,4 @@
-/* AIVA Caisse - écran JOURNAL D'AUDIT (patron) */
+/* EvoBuskin - écran JOURNAL D'AUDIT (patron) */
 const VueAudit = {
   nombre: 60, // nombre de lignes affichées (bouton "Voir plus")
 
@@ -30,7 +30,7 @@ const VueAudit = {
     $('#aCsv').addEventListener('click', async () => {
       const l = [['N°', 'Date', 'Heure', 'Acteur', 'Action', 'Détail', 'Empreinte']];
       [...liste].reverse().forEach((e) => l.push([e.id, formatDate(e.date), formatHeure(e.date), e.acteur, Audit.LIBELLES[e.action] || e.action, Audit.resume(e), e.hash.slice(-8)]));
-      await enregistrerFichier('aiva-caisse-journal.csv', VueReglages.csv(l), 'text/csv');
+      await enregistrerFichier('evobuskin-journal.csv', VueReglages.csv(l), 'text/csv');
     });
     const plus = $('#aPlus');
     if (plus) plus.addEventListener('click', () => { this.nombre += 60; this.afficher(conteneur); });

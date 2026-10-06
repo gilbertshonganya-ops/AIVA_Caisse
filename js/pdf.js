@@ -1,4 +1,4 @@
-/* AIVA Caisse - générateur de PDF minimal (aucune bibliothèque, marche hors connexion)
+/* EvoBuskin - générateur de PDF minimal (aucune bibliothèque, marche hors connexion)
    Écrit un vrai fichier PDF A4 avec les polices standard Helvetica (accents français inclus).
    Les positions sont en points, MESURÉES DEPUIS LE HAUT de la page (y croissant vers le bas), couleurs en RVB 0-255.
      const doc = Pdf.creer();  doc.nouvellePage();
@@ -72,7 +72,7 @@ const Pdf = (() => {
         objs[1] = '<< /Type /Pages /Kids [' + toutes.map((_, i) => (6 + 2 * i) + ' 0 R').join(' ') + '] /Count ' + toutes.length + ' >>';
         objs[2] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
         objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
-        objs[4] = '<< /Title (' + echapper(nettoyer(titre || 'AIVA Caisse')) + ') /Producer (AIVA Caisse) >>';
+        objs[4] = '<< /Title (' + echapper(nettoyer(titre || 'EvoBuskin')) + ') /Producer (EvoBuskin) >>';
         toutes.forEach((contenu, i) => {
           const flux = contenu.join('\n');
           objs[5 + 2 * i] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + LARGEUR + ' ' + HAUTEUR + '] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ' + (7 + 2 * i) + ' 0 R >>';

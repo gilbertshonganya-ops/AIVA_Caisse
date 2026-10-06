@@ -1,4 +1,4 @@
-/* AIVA Caisse - données de démonstration
+/* EvoBuskin - données de démonstration
    Génère une petite boutique de Kinshasa avec 20 produits, 3 clients endettés
    et ~14 jours de ventes pour que les rapports soient remplis. */
 const Demo = (() => {
@@ -158,7 +158,7 @@ const Demo = (() => {
     ];
 
     return {
-      application: 'AIVA Caisse', version: 1, date: maintenant,
+      application: 'EvoBuskin', version: 1, date: maintenant,
       donnees: { produits, ventes, clients: CLIENTS.map((c) => ({ ...c })), dettes, mouvements, depenses, fournisseurs, achats, dettesFournisseurs, params }
     };
   }

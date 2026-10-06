@@ -4,21 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b7a3e">
-  <meta name="description" content="AIVA Caisse : caisse, stock et dettes clients, même sans Internet.">
+  <meta name="description" content="EvoBuskin : caisse, stock et dettes clients, même sans Internet.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/style.css">
-  <title>AIVA Caisse</title>
+  <title>EvoBuskin</title>
 </head>
 <body>
   <!-- Écran de chargement affiché pendant l'ouverture de la base -->
-  <div id="chargement"><div class="logo-rond">A</div><p>AIVA Caisse</p></div>
+  <div id="chargement"><img src="icons/logo.png" alt="EvoBuskin" width="128" height="128"><p>EvoBuskin</p></div>
 
   <div id="app" hidden>
     <header id="barre">
       <div class="barre-gauche">
-        <strong id="nomBoutique">AIVA Caisse</strong>
+        <strong id="nomBoutique">EvoBuskin</strong>
         <small id="infoRole"></small>
       </div>
       <div class="barre-droite">
@@ -34,11 +34,11 @@
 
   <!-- Ordre important : utilitaires, base de données, modules, vues, puis application -->
   <script src="js/utils.js"></script>
+  <script src="js/periode.js"></script>
   <script src="js/db.js"></script>
   <script src="js/audit.js"></script>
   <script src="js/pdf.js"></script>
   <script src="js/coffre.js"></script>
-  <script src="js/imprimante.js"></script>
   <script src="js/scanner.js"></script>
   <script src="js/demo.js"></script>
   <script src="js/vue-caisse.js"></script>

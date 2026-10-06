@@ -1,7 +1,7 @@
-/* AIVA Caisse - écran STOCK : liste, entrées/sorties, alertes de rupture, inventaire */
+/* EvoBuskin - écran STOCK : liste, entrées/sorties, alertes de rupture, inventaire */
 const VueStock = {
   recherche: '',
-  filtre: 'tous', // 'tous' | 'alertes'
+  filtre: 'tous', // 'tous' | 'alertes' | 'prix' (produits sans prix de vente)
   produits: [],
 
   // État d'un produit : 'rupture' (0), 'bas' (sous le seuil) ou 'ok'
@@ -20,6 +20,7 @@ const VueStock = {
   async afficher(conteneur) {
     this.produits = await DB.tout('produits');
     const nbAlertes = this.produits.filter((p) => this.etat(p) !== 'ok').length;
+    const nbSansPrix = this.produits.filter(prixAFixer).length;
     let valeur = 0;
     if (App.estPatron()) valeur = this.produits.reduce((s, p) => s + p.stock * versUSD(p.prixAchat || 0, p.devise, App.taux()), 0);
 
@@ -30,7 +31,7 @@ const VueStock = {
         : '') +
       '<div class="recherche"><input id="rechStock" type="search" placeholder="Chercher un produit" autocomplete="off" value="' + esc(this.recherche) + '">' +
       (App.estPatron() ? '<button class="btn" id="btnAjout" aria-label="Ajouter un produit">+</button>' : '') + '</div>' +
-      '<div class="segment" id="filtres"><button data-f="tous">Tous</button><button data-f="alertes">Alertes (' + nbAlertes + ')</button></div>' +
+      '<div class="segment" id="filtres"><button data-f="tous">Tous</button><button data-f="alertes">Alertes (' + nbAlertes + ')</button><button data-f="prix">Prix à fixer (' + nbSansPrix + ')</button></div>' +
       (App.estPatron() ? '<button class="btn contour" id="btnInventaire" style="margin-bottom:12px">Faire l\'inventaire</button>' : '') +
       '<div id="listeStock"></div>';
 
@@ -49,7 +50,7 @@ const VueStock = {
   dessinerListe() {
     const mots = this.recherche.trim().toLowerCase();
     const liste = this.produits
-      .filter((p) => this.filtre === 'tous' || this.etat(p) !== 'ok')
+      .filter((p) => this.filtre === 'tous' || (this.filtre === 'alertes' && this.etat(p) !== 'ok') || (this.filtre === 'prix' && prixAFixer(p)))
       .filter((p) => !mots || p.nom.toLowerCase().includes(mots) || (p.codeBarres || '').includes(mots) || (p.categorie || '').toLowerCase().includes(mots))
       .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     const el = $('#listeStock');
@@ -59,8 +60,8 @@ const VueStock = {
     }
     el.innerHTML = '<div class="liste">' + liste.map((p) =>
       '<div class="ligne" data-id="' + p.id + '"><div><div class="nom">' + esc(p.nom) + '</div>' +
-      '<div class="sous">' + esc(p.categorie || 'Sans catégorie') + ' &middot; ' + prixProduit(p) + '</div></div>' +
-      '<div class="droite">' + this.badge(p) + '</div></div>').join('') + '</div>';
+      '<div class="sous">' + esc(p.categorie || 'Sans catégorie') + ' &middot; ' + (prixAFixer(p) ? '<b style="color:var(--couleur-alerte)">Prix de vente à fixer</b>' : prixProduit(p)) + '</div></div>' +
+      '<div class="droite">' + this.badge(p) + (prixAFixer(p) ? '<div style="margin-top:4px"><span class="badge orange">Prix à fixer</span></div>' : '') + '</div></div>').join('') + '</div>';
     $$('.ligne', el).forEach((l) => l.addEventListener('click', () => this.detail(Number(l.dataset.id))));
   },
 
@@ -72,10 +73,10 @@ const VueStock = {
     const f = ouvrirFenetre(p.nom,
       '<div class="ligne-flex"><span>' + this.badge(p) + '</span><span class="petit">Alerte à ' + formatQuantite(p.seuil || 0) + '</span></div>' +
       '<div class="liste" style="margin-top:10px">' +
-        '<div class="ligne"><span>Prix de vente</span><span class="gras">' + prixProduit(p) + '</span></div>' +
+        '<div class="ligne"><span>Prix de vente</span><span class="gras">' + (prixAFixer(p) ? 'À fixer (touchez Modifier)' : prixProduit(p)) + '</span></div>' +
         (App.estPatron()
           ? '<div class="ligne"><span>Prix d\'achat</span><span>' + prixProduit(p, 'prixAchat') + '</span></div>' +
-            '<div class="ligne"><span>Bénéfice par unité</span><span class="vert-txt gras">' + formatUSD(marge) + '</span></div>'
+            (prixAFixer(p) ? '' : '<div class="ligne"><span>Bénéfice par unité</span><span class="vert-txt gras">' + formatUSD(marge) + '</span></div>')
           : '') +
         (p.prixGros != null ? '<div class="ligne"><span>Prix de gros (dès ' + formatQuantite(p.seuilGros) + ')</span><span class="gras">' + prixProduit(p, 'prixGros') + '</span></div>' : '') +
         (p.cartonQte ? '<div class="ligne"><span>Carton de ' + p.cartonQte + '</span><span class="gras">' + (p.prixCarton != null ? prixProduit(p, 'prixCarton') : 'au prix normal') + '</span></div>' : '') +
@@ -144,7 +145,7 @@ const VueStock = {
       '<label class="champ"><span>Les prix sont en</span><select id="fDev"><option value="USD">Dollars ($)</option><option value="CDF">Francs congolais (FC)</option></select></label>' +
       '<div class="deux-colonnes">' +
         '<label class="champ"><span>Prix d\'achat</span><input id="fAchat" inputmode="decimal" autocomplete="off" value="' + esc(p.prixAchat) + '"></label>' +
-        '<label class="champ"><span>Prix de vente *</span><input id="fVente" inputmode="decimal" autocomplete="off" value="' + esc(p.prixVente) + '"></label>' +
+        '<label class="champ"><span>Prix de vente (vide = à fixer)</span><input id="fVente" inputmode="decimal" autocomplete="off" value="' + esc(p.prixVente > 0 ? p.prixVente : '') + '"></label>' +
       '</div>' +
       '<details class="options"' + ((p.prixGros != null || p.cartonQte) ? ' open' : '') + '><summary>Prix de gros et cartons (facultatif)</summary>' +
         '<p class="petit">Le prix de gros s\'applique tout seul quand le client prend assez d\'unités. Le carton se vend en un clic dans le panier.</p>' +
@@ -168,7 +169,8 @@ const VueStock = {
     $('#fOk', f.el).addEventListener('click', async () => {
       const nom = $('#fNom', f.el).value.trim();
       const achat = $('#fAchat', f.el).value.trim() === '' ? 0 : lireNombre($('#fAchat', f.el).value);
-      const vente = lireNombre($('#fVente', f.el).value);
+      const venteBrut = $('#fVente', f.el).value.trim();
+      const vente = venteBrut === '' ? 0 : lireNombre(venteBrut); // vide = prix pas encore fixé
       const seuil = $('#fSeuil', f.el).value.trim() === '' ? 0 : lireNombre($('#fSeuil', f.el).value);
       const stockDepart = nouveau ? ($('#fStock', f.el).value.trim() === '' ? 0 : lireNombre($('#fStock', f.el).value)) : p.stock;
       const code = $('#fCode', f.el).value.trim();
@@ -185,7 +187,7 @@ const VueStock = {
       if (prixCarton !== null && (isNaN(prixCarton) || prixCarton < 0)) { toast('Le prix du carton est invalide', 'erreur'); return; }
       if (prixCarton !== null && cartonQte === null) { toast('Indiquez combien d\'unités contient un carton', 'erreur'); return; }
       if (code && this.produits.some((x) => x.codeBarres === code && x.id !== p.id)) { toast('Ce code-barres existe déjà pour un autre produit', 'erreur'); return; }
-      if (achat > vente && !(await confirmer('Prix à vérifier', 'Le prix d\'achat est plus grand que le prix de vente : vous vendriez à perte. Continuer ?', 'Continuer'))) return;
+      if (vente > 0 && achat > vente && !(await confirmer('Prix à vérifier', 'Le prix d\'achat est plus grand que le prix de vente : vous vendriez à perte. Continuer ?', 'Continuer'))) return;
       const objet = Object.assign({}, p, {
         nom, categorie: $('#fCat', f.el).value.trim(), codeBarres: code, devise: $('#fDev', f.el).value,
         prixAchat: achat, prixVente: vente, seuil, stock: arrondi(stockDepart, 3),

@@ -1,4 +1,4 @@
-/* AIVA Caisse - scan de code-barres par la caméra
+/* EvoBuskin - scan de code-barres par la caméra
    Utilise l'API native "BarcodeDetector" (Chrome Android récent). Si elle n'existe pas
    sur le téléphone, on propose la saisie manuelle du code.
    Les scanners USB/Bluetooth fonctionnent aussi : ils "tapent" le code dans le champ de recherche. */

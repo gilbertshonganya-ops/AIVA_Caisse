@@ -1,4 +1,4 @@
-/* AIVA Caisse - utilitaires communs
+/* EvoBuskin - utilitaires communs
    Fonctions simples réutilisées partout : sélecteurs, formats d'argent, dates, fenêtres. */
 
 // ---------- Raccourcis DOM ----------
@@ -182,6 +182,16 @@ function confirmer(titre, message, texteOui = 'Oui', danger = false) {
   });
 }
 
+
+// Nom "comparable" : sans accents, sans majuscules, sans ponctuation, espaces réduits.
+// Sert à repérer les doublons : "Mama  Julie" et "mama julie" sont le même nom.
+function normaliserNom(texte) {
+  return String(texte == null ? '' : texte).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Un produit sans prix de vente (ex. créé par un achat) attend que le patron le fixe dans Stock.
+function prixAFixer(p) { return !(Number(p.prixVente) > 0); }
 
 // Enregistre un fichier sur le téléphone (téléchargement ou partage)
 async function enregistrerFichier(nom, contenu, type) {

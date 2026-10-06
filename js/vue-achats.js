@@ -1,6 +1,7 @@
-/* AIVA Caisse - écran ACHATS et FOURNISSEURS (patron)
+/* EvoBuskin - écran ACHATS et FOURNISSEURS (patron)
    Un achat augmente le stock, met à jour le prix d'achat (dernier prix payé) et crée,
-   si tout n'est pas payé, une dette envers le fournisseur. */
+   si tout n'est pas payé, une dette envers le fournisseur.
+   Un achat peut aussi créer un NOUVEAU produit : il entre en stock tout de suite, prix de vente à fixer ensuite. */
 const VueAchats = {
   onglet: 'achats',
   fournisseurs: [],
@@ -69,7 +70,7 @@ const VueAchats = {
     ouvrirFenetre('Achat n° ' + a.id,
       '<p class="petit">' + formatDateHeure(a.date) + (f0 ? ' &middot; ' + esc(f0.nom) : '') + '</p>' +
       '<div class="liste">' + a.lignes.map((l) =>
-        '<div class="ligne" style="cursor:default"><div><div class="nom">' + esc(l.nom) + '</div><div class="sous">' + formatQuantite(l.qte) + ' x ' + (l.devise === 'CDF' ? formatCDF(l.prixSaisi) : formatUSD(l.prixSaisi)) + '</div></div>' +
+        '<div class="ligne" style="cursor:default"><div><div class="nom">' + esc(l.nom) + (l.nouveau ? ' <span class="badge orange">Nouveau produit</span>' : '') + '</div><div class="sous">' + formatQuantite(l.qte) + ' x ' + (l.devise === 'CDF' ? formatCDF(l.prixSaisi) : formatUSD(l.prixSaisi)) + '</div></div>' +
         '<div class="gras">' + formatUSD(l.qte * l.prixUnitaireUSD) + '</div></div>').join('') + '</div>' +
       '<div class="ligne-flex"><span>Total</span><span class="gras">' + formatUSD(a.totalUSD) + '</span></div>' +
       '<div class="ligne-flex"><span>Payé</span><span>' + formatUSD(a.payeUSD) + '</span></div>' +
@@ -78,11 +79,13 @@ const VueAchats = {
   },
 
   // ---------- Nouvel achat ----------
+  // Chaque ligne est soit un produit déjà en boutique, soit un NOUVEAU produit (créé en stock dès l'achat,
+  // son prix de vente sera fixé plus tard dans Stock).
   async formulaireAchat() {
     const produits = (await DB.tout('produits')).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
-    if (!produits.length) { toast('Ajoutez d\'abord des produits dans le Stock', 'erreur'); return; }
     const taux = App.taux();
-    const lignes = [{ produitId: '', qte: '', prix: '' }];
+    const nouvelleLigne = () => ({ produitId: '', nouveau: null, qte: '', prix: '' });
+    const lignes = [nouvelleLigne()];
     let deviseP = 'USD', payeModifie = false;
 
     const f = ouvrirFenetre('Nouvel achat',
@@ -97,15 +100,17 @@ const VueAchats = {
       '<label class="champ"><span>Montant payé maintenant</span><input id="aPaye" inputmode="decimal" autocomplete="off"></label>' +
       '<div id="aInfo" class="petit" style="margin:-6px 0 10px"></div>' +
       '<label class="champ"><span>Note (facultatif)</span><input id="aNote" autocomplete="off"></label>' +
-      '<label class="case"><input type="checkbox" id="aMaj" checked> Mettre à jour le prix d\'achat des produits</label>' +
+      '<label class="case"><input type="checkbox" id="aMaj" checked> Mettre à jour le prix d\'achat des produits déjà en boutique</label>' +
       '<button class="btn" id="aOk">Enregistrer l\'achat</button>', { verrouille: true });
     const el = f.el;
 
+    const produitDe = (l) => (l.nouveau || !l.produitId) ? null : produits.find((x) => x.id === Number(l.produitId));
+    const deviseDe = (l) => l.nouveau ? l.nouveau.devise : (produitDe(l) ? produitDe(l).devise : null);
     const coutUSD = (l) => {
-      const p = produits.find((x) => x.id === Number(l.produitId));
+      const dev = deviseDe(l);
       const q = lireNombre(l.qte), pr = lireNombre(l.prix);
-      if (!p || isNaN(q) || isNaN(pr)) return 0;
-      return q * versUSD(pr, p.devise, taux);
+      if (!dev || isNaN(q) || isNaN(pr)) return 0;
+      return q * versUSD(pr, dev, taux);
     };
     const total = () => lignes.reduce((s, l) => s + coutUSD(l), 0);
     const majTotaux = () => {
@@ -119,28 +124,65 @@ const VueAchats = {
       info.className = 'petit ' + (reste > 0.005 ? 'rouge-txt' : '');
       info.textContent = reste > 0.005 ? 'Reste dû au fournisseur : ' + formatUSD(reste) + ' (' + formatCDF(reste * taux) + ')' : '';
     };
+    // Si le nom tapé existe déjà dans la boutique, on le dit tout de suite
+    const existant = (nom) => { const n = normaliserNom(nom); return n ? produits.find((x) => normaliserNom(x.nom) === n) : null; };
+    const majAlerteNom = (i) => {
+      const e = $('#alerteNom' + i, el); if (!e) return;
+      const x = existant(lignes[i].nouveau.nom);
+      e.textContent = x ? '« ' + x.nom + ' » existe déjà : choisissez-le dans la liste des produits.' : '';
+    };
+
     const dessinerLignes = () => {
       $('#aLignes', el).innerHTML = lignes.map((l, i) => {
-        const p = produits.find((x) => x.id === Number(l.produitId));
+        const p = produitDe(l), dev = deviseDe(l);
+        const valeur = l.nouveau ? '__new__' : String(l.produitId);
+        const champsNouveau = l.nouveau
+          ? '<div class="bandeau" style="margin:0 0 8px">Ce produit sera ajouté au stock dès que vous enregistrez l\'achat. Son prix de vente sera à fixer ensuite dans <b>Stock</b>.</div>' +
+            '<label class="champ"><span>Nom du nouveau produit *</span><input data-n="' + i + '" autocomplete="off" value="' + esc(l.nouveau.nom) + '"></label>' +
+            '<div id="alerteNom' + i + '" class="petit rouge-txt" style="margin:-6px 0 8px"></div>' +
+            '<div class="deux-colonnes"><label class="champ"><span>Catégorie</span><input data-c="' + i + '" list="listeCatsAchat" autocomplete="off" value="' + esc(l.nouveau.categorie) + '"></label>' +
+            '<label class="champ"><span>Prix exprimés en</span><select data-dv="' + i + '"><option value="USD"' + (l.nouveau.devise === 'USD' ? ' selected' : '') + '>Dollars ($)</option><option value="CDF"' + (l.nouveau.devise === 'CDF' ? ' selected' : '') + '>Francs (FC)</option></select></label></div>' +
+            '<label class="champ"><span>Code-barres (facultatif, ajoutable plus tard)</span><div class="recherche" style="margin:0"><input data-cb="' + i + '" inputmode="numeric" autocomplete="off" value="' + esc(l.nouveau.code) + '"><button class="btn" data-scan="' + i + '" type="button">&#128247;</button></div></label>' +
+            '<label class="champ"><span>Prix de vente (facultatif : vous pourrez le fixer plus tard)</span><input data-pv="' + i + '" inputmode="decimal" autocomplete="off" value="' + esc(l.nouveau.prixVente) + '"></label>'
+          : '';
         return '<div class="carte" style="padding:10px;margin-bottom:8px"><select data-p="' + i + '" style="width:100%;padding:10px;border:1.5px solid var(--couleur-bordure);border-radius:10px;margin-bottom:8px">' +
-          '<option value="">-- Choisir le produit --</option>' + produits.map((x) => '<option value="' + x.id + '"' + (x.id === Number(l.produitId) ? ' selected' : '') + '>' + esc(x.nom) + '</option>').join('') + '</select>' +
-          '<div class="deux-colonnes"><label class="champ" style="margin:0"><span>Quantité</span><input data-q="' + i + '" inputmode="decimal" value="' + esc(l.qte) + '"></label>' +
-          '<label class="champ" style="margin:0"><span>Prix d\'achat unitaire (' + (p ? (p.devise === 'CDF' ? 'FC' : '$') : '...') + ')</span><input data-pr="' + i + '" inputmode="decimal" value="' + esc(l.prix) + '"></label></div>' +
+          '<option value="">-- Choisir le produit --</option>' +
+          '<option value="__new__"' + (valeur === '__new__' ? ' selected' : '') + '>+ Nouveau produit (pas encore dans la boutique)</option>' +
+          produits.map((x) => '<option value="' + x.id + '"' + (valeur === String(x.id) ? ' selected' : '') + '>' + esc(x.nom) + '</option>').join('') + '</select>' +
+          champsNouveau +
+          '<div class="deux-colonnes"><label class="champ" style="margin:0"><span>Quantité achetée</span><input data-q="' + i + '" inputmode="decimal" value="' + esc(l.qte) + '"></label>' +
+          '<label class="champ" style="margin:0"><span>Prix d\'achat unitaire (' + (dev ? (dev === 'CDF' ? 'FC' : '$') : '...') + ')</span><input data-pr="' + i + '" inputmode="decimal" value="' + esc(l.prix) + '"></label></div>' +
           (lignes.length > 1 ? '<button class="btn gris petit-btn" data-x="' + i + '" style="margin-top:8px">Retirer</button>' : '') + '</div>';
-      }).join('');
+      }).join('') + '<datalist id="listeCatsAchat">' + Array.from(new Set(produits.map((x) => x.categorie).filter(Boolean))).map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>';
+
       $$('[data-p]', el).forEach((s) => s.addEventListener('change', () => {
-        const l = lignes[Number(s.dataset.p)]; l.produitId = s.value;
-        const p = produits.find((x) => x.id === Number(s.value));
-        l.prix = p ? String(p.prixAchat || '') : '';
+        const l = lignes[Number(s.dataset.p)];
+        if (s.value === '__new__') { l.produitId = ''; l.nouveau = { nom: '', categorie: '', devise: 'USD', code: '', prixVente: '' }; l.prix = ''; }
+        else {
+          l.nouveau = null; l.produitId = s.value;
+          const x = produits.find((y) => y.id === Number(s.value));
+          l.prix = x ? String(x.prixAchat || '') : '';
+        }
         dessinerLignes(); majTotaux();
+      }));
+      $$('[data-n]', el).forEach((s) => s.addEventListener('input', () => { const i = Number(s.dataset.n); lignes[i].nouveau.nom = s.value; majAlerteNom(i); }));
+      $$('[data-c]', el).forEach((s) => s.addEventListener('input', () => { lignes[Number(s.dataset.c)].nouveau.categorie = s.value; }));
+      $$('[data-cb]', el).forEach((s) => s.addEventListener('input', () => { lignes[Number(s.dataset.cb)].nouveau.code = s.value; }));
+      $$('[data-pv]', el).forEach((s) => s.addEventListener('input', () => { lignes[Number(s.dataset.pv)].nouveau.prixVente = s.value; }));
+      $$('[data-dv]', el).forEach((s) => s.addEventListener('change', () => { lignes[Number(s.dataset.dv)].nouveau.devise = s.value; dessinerLignes(); majTotaux(); }));
+      $$('[data-scan]', el).forEach((b) => b.addEventListener('click', async () => {
+        const i = Number(b.dataset.scan);
+        const code = await Scanner.scanner();
+        if (code) { lignes[i].nouveau.code = code; $('[data-cb="' + i + '"]', el).value = code; }
       }));
       $$('[data-q]', el).forEach((s) => s.addEventListener('input', () => { lignes[Number(s.dataset.q)].qte = s.value; majTotaux(); }));
       $$('[data-pr]', el).forEach((s) => s.addEventListener('input', () => { lignes[Number(s.dataset.pr)].prix = s.value; majTotaux(); }));
       $$('[data-x]', el).forEach((s) => s.addEventListener('click', () => { lignes.splice(Number(s.dataset.x), 1); dessinerLignes(); majTotaux(); }));
+      lignes.forEach((l, i) => { if (l.nouveau) majAlerteNom(i); });
     };
     dessinerLignes(); majTotaux();
 
-    $('#aAj', el).addEventListener('click', () => { lignes.push({ produitId: '', qte: '', prix: '' }); dessinerLignes(); });
+    $('#aAj', el).addEventListener('click', () => { lignes.push(nouvelleLigne()); dessinerLignes(); });
     $('#aF', el).addEventListener('change', (e) => { $('#aNouveau', el).hidden = e.target.value !== 'new'; });
     $('#aPaye', el).addEventListener('input', () => { payeModifie = true; majTotaux(); });
     $$('#devises button', el).forEach((b) => b.addEventListener('click', () => {
@@ -149,12 +191,33 @@ const VueAchats = {
     }));
 
     $('#aOk', el).addEventListener('click', async () => {
-      const ids = new Set();
+      const ids = new Set(), nomsNouveaux = new Set(), codesNouveaux = new Set();
       const lignesOk = [];
       for (const l of lignes) {
-        const p = produits.find((x) => x.id === Number(l.produitId));
         const q = lireNombre(l.qte), pr = lireNombre(l.prix);
-        if (!p) { toast('Choisissez le produit pour chaque ligne', 'erreur'); return; }
+        if (l.nouveau) {
+          const nom = l.nouveau.nom.trim(), code = l.nouveau.code.trim();
+          if (!nom) { toast('Écrivez le nom du nouveau produit', 'erreur'); return; }
+          const deja = existant(nom);
+          if (deja) { toast('« ' + deja.nom + ' » existe déjà : choisissez-le dans la liste des produits', 'erreur'); return; }
+          if (nomsNouveaux.has(normaliserNom(nom))) { toast('« ' + nom + ' » est écrit deux fois dans cet achat', 'erreur'); return; }
+          if (code && (produits.some((x) => x.codeBarres === code) || codesNouveaux.has(code))) { toast('Le code-barres ' + code + ' existe déjà pour un autre produit', 'erreur'); return; }
+          if (isNaN(q) || q <= 0) { toast('Quantité invalide pour « ' + nom + ' »', 'erreur'); return; }
+          if (isNaN(pr) || pr < 0) { toast('Prix d\'achat invalide pour « ' + nom + ' »', 'erreur'); return; }
+          const pvBrut = String(l.nouveau.prixVente).trim();
+          const pv = pvBrut === '' ? 0 : lireNombre(pvBrut);
+          if (isNaN(pv) || pv < 0) { toast('Prix de vente invalide pour « ' + nom + ' »', 'erreur'); return; }
+          nomsNouveaux.add(normaliserNom(nom)); if (code) codesNouveaux.add(code);
+          const dev = l.nouveau.devise;
+          lignesOk.push({
+            produitId: null, nom, qte: arrondi(q, 3), prixSaisi: pr, devise: dev, prixUnitaireUSD: arrondi(versUSD(pr, dev, taux), 6),
+            nouveauProduit: { nom, categorie: l.nouveau.categorie.trim(), codeBarres: code, devise: dev, prixAchat: pr, prixVente: pv, seuil: 5,
+                              prixGros: null, seuilGros: null, cartonQte: null, prixCarton: null }
+          });
+          continue;
+        }
+        const p = produitDe(l);
+        if (!p) { toast('Choisissez le produit pour chaque ligne (ou « Nouveau produit »)', 'erreur'); return; }
         if (ids.has(p.id)) { toast('« ' + p.nom + ' » apparaît deux fois : regroupez les quantités', 'erreur'); return; }
         if (isNaN(q) || q <= 0) { toast('Quantité invalide pour « ' + p.nom + ' »', 'erreur'); return; }
         if (isNaN(pr) || pr < 0) { toast('Prix invalide pour « ' + p.nom + ' »', 'erreur'); return; }
@@ -172,17 +235,22 @@ const VueAchats = {
       if (choix === 'new') {
         const nom = $('#aNom', el).value.trim();
         if (!nom) { toast('Écrivez le nom du nouveau fournisseur', 'erreur'); return; }
-        fournisseurId = await DB.ajouter('fournisseurs', { nom, tel: $('#aTel', el).value.trim() });
-      } else if (choix) fournisseurId = Number(choix);
-      if (reste > 0 && !fournisseurId) { toast('Choisissez le fournisseur : il reste ' + formatUSD(reste) + ' à lui payer', 'erreur'); return; }
+      }
+      if (reste > 0 && !choix) { toast('Choisissez le fournisseur : il reste ' + formatUSD(reste) + ' à lui payer', 'erreur'); return; }
+      if (choix === 'new') fournisseurId = await DB.ajouter('fournisseurs', { nom: $('#aNom', el).value.trim(), tel: $('#aTel', el).value.trim() });
+      else if (choix) fournisseurId = Number(choix);
+      const nouveauxNoms = lignesOk.filter((l) => l.nouveauProduit).map((l) => l.nom);
       const achat = {
         date: Date.now(), fournisseurId, lignes: lignesOk, totalUSD: t, payeUSD: arrondi(paye, 6), resteUSD: arrondi(reste, 6),
         taux, majPrix: $('#aMaj', el).checked, note: $('#aNote', el).value.trim(), vendeur: App.nomVendeur()
       };
       try {
         await DB.enregistrerAchat(achat);
-        Audit.noter('Achat', 'n°' + achat.id + ' total ' + formatUSD(t) + (reste > 0 ? ', reste dû ' + formatUSD(reste) : ''));
-        f.fermer(); toast('Achat enregistré : le stock est à jour', 'ok'); this.afficher($('#vue'));
+        Audit.noter('Achat', 'n°' + achat.id + ' total ' + formatUSD(t) + (reste > 0 ? ', reste dû ' + formatUSD(reste) : '') + (nouveauxNoms.length ? ', nouveaux produits : ' + nouveauxNoms.join(', ') : ''));
+        nouveauxNoms.forEach((nom) => Audit.log('produit_cree', { nom, via: 'achat fournisseur', prixVente: 'à fixer' }));
+        f.fermer();
+        toast(nouveauxNoms.length ? 'Achat enregistré : le stock est à jour (' + nouveauxNoms.length + ' nouveau(x) produit(s), prix de vente à fixer dans Stock)' : 'Achat enregistré : le stock est à jour', 'ok');
+        this.afficher($('#vue'));
       } catch (e) { toast(e.message, 'erreur'); }
     });
   },

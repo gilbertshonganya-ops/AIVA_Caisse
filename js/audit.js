@@ -1,12 +1,10 @@
-/* AIVA Caisse - journal d'audit infalsifiable (version locale)
+/* EvoBuskin - journal d'audit infalsifiable (version locale)
    Chaque opération sensible est écrite dans le journal avec : qui, quand, quoi.
    Chaque entrée contient l'empreinte SHA-256 de l'entrée précédente ("chaîne de hachage") :
    modifier ou supprimer une ancienne entrée casse la chaîne et la vérification le détecte.
 
-   LIMITE HONNÊTE : sur le téléphone seul, quelqu'un qui maîtrise l'outil pourrait recalculer
-   toute la chaîne. L'immuabilité complète viendra avec le cloud (étape suivante), qui gardera
-   une copie de l'empreinte hors du téléphone. Aucun écran de l'application ne permet de modifier
-   ou d'effacer le journal. */
+   Limite : sur le téléphone seul, une personne experte qui maîtrise l'outil pourrait recalculer toute la chaîne.
+   Aucun écran de l'application ne permet de modifier ou d'effacer le journal. */
 
 // SHA-256 en JavaScript pur : identique partout (même sans HTTPS) et sans bibliothèque.
 const Sha256 = (() => {

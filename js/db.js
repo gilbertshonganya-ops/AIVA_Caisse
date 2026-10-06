@@ -1,4 +1,4 @@
-/* AIVA Caisse - base de données locale (IndexedDB)
+/* EvoBuskin - base de données locale (IndexedDB)
    Tout est stocké dans le téléphone. Aucune donnée n'est envoyée sur Internet.
 
    VERSION 2 (v1.1) : ajout des tables fournisseurs, achats, dettesFournisseurs, depenses, audit.
@@ -13,7 +13,7 @@
    - audit               : journal infalsifiable (chaîne de hachage SHA-256), voir audit.js
 */
 const DB = (() => {
-  const NOM = 'aiva-caisse';
+  const NOM = 'aiva-caisse'; // nom technique de la base : ne pas changer (sinon les données existantes ne seraient plus retrouvées)
   const VERSION = 2;
   const TABLES = ['produits', 'ventes', 'clients', 'dettes', 'mouvements', 'params',
                   'fournisseurs', 'achats', 'dettesFournisseurs', 'depenses', 'audit'];
@@ -45,7 +45,7 @@ const DB = (() => {
       };
       rq.onsuccess = () => { base = rq.result; resolve(base); };
       rq.onerror = () => reject(rq.error);
-      rq.onblocked = () => reject(new Error('Fermez les autres onglets de AIVA Caisse puis rechargez'));
+      rq.onblocked = () => reject(new Error('Fermez les autres onglets de EvoBuskin puis rechargez'));
     });
   }
 
@@ -180,15 +180,45 @@ const DB = (() => {
 
   // ----- Enregistrer un achat fournisseur : stock + prix d'achat + dette fournisseur -----
   // achat.lignes[i] = { produitId, nom, qte, prixSaisi (dans la devise du produit), devise, prixUnitaireUSD }
-  // achat.majPrix : si vrai, le prix d'achat du produit devient le prix saisi
+  //   ou, pour un produit qui n'existe pas encore : { produitId: null, nouveauProduit: {...}, nom, qte, ... }
+  //   Le nouveau produit est créé tout de suite, avec comme stock la quantité achetée.
+  // achat.majPrix : si vrai, le prix d'achat d'un produit existant devient le prix saisi
   function enregistrerAchat(achat) {
     return transaction(['produits', 'achats', 'mouvements', 'dettesFournisseurs'], (t, ctx, echec) => {
       if (!achat.lignes.length) { echec('Aucun produit dans l\'achat'); return; }
-      const ids = achat.lignes.map((l) => l.produitId);
+      const ids = achat.lignes.filter((l) => l.produitId).map((l) => l.produitId);
       if (new Set(ids).size !== ids.length) { echec('Un produit apparaît deux fois dans l\'achat'); return; }
       const sp = t.objectStore('produits');
       let restants = achat.lignes.length;
+      const ligneTerminee = () => {
+        restants -= 1;
+        if (restants > 0) return;
+        const ra = t.objectStore('achats').add(achat);
+        ra.onsuccess = () => {
+          achat.id = ra.result;
+          ctx.resultat = achat;
+          if (achat.resteUSD > 0.0001) {
+            t.objectStore('dettesFournisseurs').add({
+              fournisseurId: achat.fournisseurId, date: achat.date, type: 'dette',
+              montantUSD: achat.resteUSD, note: 'Achat n° ' + achat.id, achatId: achat.id
+            });
+          }
+        };
+      };
       achat.lignes.forEach((l) => {
+        if (l.nouveauProduit) { // nouveau produit : créé en stock immédiatement
+          const np = Object.assign({}, l.nouveauProduit, { stock: arrondi(l.qte, 3) });
+          const rn = sp.add(np);
+          rn.onsuccess = () => {
+            l.produitId = rn.result; l.nouveau = true; delete l.nouveauProduit;
+            t.objectStore('mouvements').add({
+              produitId: rn.result, nom: np.nom, date: achat.date, type: 'entree', qte: l.qte,
+              note: 'Achat fournisseur (nouveau produit)', vendeur: achat.vendeur
+            });
+            ligneTerminee();
+          };
+          return;
+        }
         const rq = sp.get(l.produitId);
         rq.onsuccess = () => {
           const p = rq.result;
@@ -199,20 +229,7 @@ const DB = (() => {
           t.objectStore('mouvements').add({
             produitId: p.id, nom: p.nom, date: achat.date, type: 'entree', qte: l.qte, note: 'Achat fournisseur', vendeur: achat.vendeur
           });
-          restants -= 1;
-          if (restants === 0) {
-            const ra = t.objectStore('achats').add(achat);
-            ra.onsuccess = () => {
-              achat.id = ra.result;
-              ctx.resultat = achat;
-              if (achat.resteUSD > 0.0001) {
-                t.objectStore('dettesFournisseurs').add({
-                  fournisseurId: achat.fournisseurId, date: achat.date, type: 'dette',
-                  montantUSD: achat.resteUSD, note: 'Achat n° ' + achat.id, achatId: achat.id
-                });
-              }
-            };
-          }
+          ligneTerminee();
         };
       });
     });
@@ -242,15 +259,15 @@ const DB = (() => {
   async function exporterTout() {
     const donnees = {};
     for (const t of TABLES) donnees[t] = await tout(t);
-    return { application: 'AIVA Caisse', version: 2, date: Date.now(), donnees };
+    return { application: 'EvoBuskin', version: 2, date: Date.now(), donnees };
   }
 
   // Remplace TOUTES les données par celles d'une sauvegarde (ou des données de démo).
   // Une sauvegarde de la version 1 ne touche pas aux tables de la version 2 (elles n'y existent pas).
   function importerTout(sauvegarde) {
     return new Promise((resolve, reject) => {
-      if (!sauvegarde || sauvegarde.application !== 'AIVA Caisse' || !sauvegarde.donnees) {
-        reject(new Error('Ce fichier n\'est pas une sauvegarde AIVA Caisse')); return;
+      if (!sauvegarde || !['EvoBuskin', 'AIVA Caisse'].includes(sauvegarde.application) || !sauvegarde.donnees) {
+        reject(new Error('Ce fichier n\'est pas une sauvegarde EvoBuskin')); return;
       }
       const t = base.transaction(TABLES, 'readwrite');
       t.oncomplete = () => resolve();

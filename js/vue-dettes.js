@@ -1,4 +1,4 @@
-/* AIVA Caisse - écran DETTES : carnet de dettes clients, paiements, rappel WhatsApp */
+/* EvoBuskin - écran DETTES : carnet de dettes clients, paiements, rappel WhatsApp */
 const VueDettes = {
   recherche: '',
   clients: [],
@@ -45,16 +45,36 @@ const VueDettes = {
     $$('.ligne', el).forEach((l) => l.addEventListener('click', () => this.detail(Number(l.dataset.id))));
   },
 
+  // Refuse un client qui ressemble à un autre : même nom OU même numéro de téléphone.
+  // Retourne un message d'erreur, ou null si tout va bien. "idExclu" : le client en cours de modification.
+  verifierClient(nom, tel, clients, idExclu) {
+    const n = normaliserNom(nom), t = normaliserTel(tel);
+    for (const c of clients) {
+      if (c.id === idExclu) continue;
+      if (n && normaliserNom(c.nom) === n) {
+        return 'Un client s\'appelle déjà « ' + c.nom + ' ». Deux personnes ne peuvent pas avoir le même nom : ajoutez une différence (prénom, quartier, surnom...).';
+      }
+      if (t && c.tel && normaliserTel(c.tel) === t) {
+        return 'Ce numéro est déjà utilisé par « ' + c.nom + ' ». Chaque personne doit avoir son propre numéro.';
+      }
+    }
+    return null;
+  },
+
   formulaireClient(client) {
     const f = ouvrirFenetre(client ? 'Modifier le client' : 'Nouveau client',
       '<label class="champ"><span>Nom *</span><input id="cNom" autocomplete="off" value="' + esc(client ? client.nom : '') + '"></label>' +
       '<label class="champ"><span>Téléphone WhatsApp</span><input id="cTel" inputmode="tel" autocomplete="off" placeholder="Ex : 0895006995" value="' + esc(client ? client.tel : '') + '"></label>' +
+      '<div class="bandeau rouge" id="cErreur" hidden></div>' +
       '<button class="btn" id="cOk">Enregistrer</button>');
+    const montrerErreur = (m) => { const e = $('#cErreur', f.el); e.textContent = m; e.hidden = false; toast('Client non enregistré', 'erreur'); };
     $('#cOk', f.el).addEventListener('click', async () => {
       const nom = $('#cNom', f.el).value.trim();
       const tel = $('#cTel', f.el).value.trim();
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
-      if (tel && normaliserTel(tel).length < 11) { toast('Numéro de téléphone trop court', 'erreur'); return; }
+      if (tel && normaliserTel(tel).length < 11) { montrerErreur('Numéro de téléphone trop court.'); return; }
+      const doublon = this.verifierClient(nom, tel, await DB.tout('clients'), client ? client.id : null);
+      if (doublon) { montrerErreur(doublon); return; }
       await DB.ecrire('clients', Object.assign({}, client || {}, { nom, tel }));
       f.fermer(); toast('Client enregistré', 'ok'); App.rafraichir();
     });

@@ -1,8 +1,8 @@
-/* AIVA Caisse - noyau de l'application
+/* EvoBuskin - noyau de l'application
    Démarrage, réglages, connexion par PIN, navigation entre les écrans. */
 const App = {
   // Réglages par défaut (modifiables dans l'écran Réglages)
-  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', pinPatron: '', pinVendeur: '', pinChange: false, derniereSauvegarde: 0, imprimeMode: 'systeme', imprimeLargeur: 32 },
+  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', pinPatron: '', pinVendeur: '', pinChange: false, derniereSauvegarde: 0 },
   role: null,            // 'patron' ou 'vendeur' (null = verrouillé)
   onglet: null,
   derniereActivite: Date.now(),
@@ -70,13 +70,13 @@ const App = {
     // Première ouverture : PIN par défaut (patron 1234, vendeur 0000)
     if (!r.pinPatron) { r.pinPatron = hacher('1234'); await DB.ecrireParam('pinPatron', r.pinPatron); }
     if (!r.pinVendeur) { r.pinVendeur = hacher('0000'); await DB.ecrireParam('pinVendeur', r.pinVendeur); }
-    $('#nomBoutique').textContent = r.nomBoutique || 'AIVA Caisse';
+    $('#nomBoutique').textContent = r.nomBoutique || 'EvoBuskin';
   },
 
   async sauverReglage(cle, valeur) {
     this.reglages[cle] = valeur;
     await DB.ecrireParam(cle, valeur);
-    if (cle === 'nomBoutique') $('#nomBoutique').textContent = valeur || 'AIVA Caisse';
+    if (cle === 'nomBoutique') $('#nomBoutique').textContent = valeur || 'EvoBuskin';
   },
 
   enregistrerServiceWorker() {
@@ -129,7 +129,8 @@ const App = {
     const vue = $('#vue');
     vue.innerHTML =
       '<div id="ecranPin">' +
-        '<h2>Qui êtes-vous ?</h2>' +
+        '<img class="logo-login" src="icons/logo.png" alt="EvoBuskin" width="96" height="96">' +
+        '<h2 style="margin:0">EvoBuskin</h2><p class="petit" style="margin:0 0 4px">Qui êtes-vous ?</p>' +
         '<div class="roles"><button data-role="vendeur" class="actif">Vendeur</button><button data-role="patron">Patron</button></div>' +
         '<p class="petit texte-centre">Tapez votre code PIN à 4 chiffres</p>' +
         '<div class="points" id="points"><i></i><i></i><i></i><i></i></div>' +
@@ -223,6 +224,10 @@ const App = {
       html += '<div class="bandeau rouge">Votre code PIN est celui par défaut (1234). Changez-le dans <b>Réglages</b> pour protéger vos chiffres.</div>';
     }
     const produits = await DB.tout('produits');
+    const sansPrix = produits.filter(prixAFixer).length;
+    if (sansPrix > 0) {
+      html += '<div class="bandeau">' + sansPrix + ' produit(s) attendent leur prix de vente. Allez dans <b>Stock</b> puis « Prix à fixer ».</div>';
+    }
     const ageJours = (Date.now() - (this.reglages.derniereSauvegarde || 0)) / 86400000;
     if (produits.length > 0 && ageJours > 7) {
       html += '<div class="bandeau">' + (this.reglages.derniereSauvegarde

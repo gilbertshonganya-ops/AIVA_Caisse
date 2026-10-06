@@ -1,16 +1,14 @@
-/* AIVA Caisse - écran DÉPENSES (patron) : loyer, transport, électricité, salaires...
+/* EvoBuskin - écran DÉPENSES (patron) : loyer, transport, électricité, salaires...
    Le bénéfice net = ventes - coût des marchandises vendues - dépenses. */
 const CATEGORIES_DEPENSES = ['Loyer', 'Électricité', 'Eau', 'Transport', 'Salaires', 'Internet et crédit téléphone', 'Taxes et patentes', 'Entretien et réparations', 'Emballages et sacs', 'Autre'];
 
 const VueDepenses = {
-  periode: 'mois',
-
-  debut() { return { jour: debutJour, semaine: debutSemaine, mois: debutMois }[this.periode](); },
+  periode: Periode.nouveau('semaine'),
 
   async afficher(conteneur) {
     const toutes = await DB.tout('depenses');
-    const debut = this.debut();
-    const liste = toutes.filter((d) => d.date >= debut).sort((a, b) => b.date - a.date);
+    const bornes = Periode.bornes(this.periode);
+    const liste = toutes.filter((d) => Periode.dans(d.date, bornes)).sort((a, b) => b.date - a.date);
     const total = liste.reduce((s, d) => s + d.montantUSD, 0);
     const parCat = {};
     liste.forEach((d) => { parCat[d.categorie] = (parCat[d.categorie] || 0) + d.montantUSD; });
@@ -18,8 +16,8 @@ const VueDepenses = {
 
     conteneur.innerHTML =
       App.entete('Dépenses') +
-      '<div class="segment" id="periodes"><button data-p="jour">Aujourd\'hui</button><button data-p="semaine">Cette semaine</button><button data-p="mois">Ce mois</button></div>' +
-      '<div class="carte"><div class="petit">Total des dépenses</div><div style="font-size:1.3rem">' + App.montantHtml(total) + '</div></div>' +
+      Periode.html(this.periode) +
+      '<div class="carte"><div class="petit">Total des dépenses (' + liste.length + ')</div><div style="font-size:1.3rem">' + App.montantHtml(total) + '</div></div>' +
       '<button class="btn" id="btnDep" style="margin-bottom:12px">+ Ajouter une dépense</button>' +
       (cats.length ? '<div class="carte"><h3>Par catégorie</h3>' + cats.map((c) =>
         '<div style="margin-top:10px"><div class="ligne-flex"><span>' + esc(c) + '</span><span class="gras">' + formatUSD(parCat[c]) + '</span></div>' +
@@ -30,10 +28,7 @@ const VueDepenses = {
         '<div class="droite rouge-txt gras">-' + formatUSD(d.montantUSD) + '</div></div>').join('') + '</div>'
         : '<div class="vide">Aucune dépense sur cette période.</div>');
 
-    $$('#periodes button').forEach((b) => {
-      b.classList.toggle('actif', b.dataset.p === this.periode);
-      b.addEventListener('click', () => { this.periode = b.dataset.p; this.afficher(conteneur); });
-    });
+    Periode.brancher(conteneur, this.periode, () => this.afficher(conteneur), { marques: new Set(toutes.map((x) => Periode.iso(x.date))) });
     $('#btnDep').addEventListener('click', () => this.formulaire());
     $$('.liste .ligne[data-id]', conteneur).forEach((l) => l.addEventListener('click', () => this.detail(toutes.find((d) => d.id === Number(l.dataset.id)))));
     App.brancherRetour(conteneur);

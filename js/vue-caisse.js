@@ -1,4 +1,4 @@
-/* AIVA Caisse - écran CAISSE : vente rapide, scan, paiement, reçu WhatsApp */
+/* EvoBuskin - écran CAISSE : vente rapide, scan, paiement, reçu WhatsApp (ventes à crédit) */
 
 const LIBELLES_MODE = { especes: 'Espèces', mpesa: 'M-Pesa', airtel: 'Airtel Money', orange: 'Orange Money', dette: 'À crédit' };
 
@@ -13,7 +13,7 @@ function construireRecu(vente, client) {
   const lignes = vente.lignes.map((l) =>
     formatQuantite(l.qte) + ' x ' + l.nom + ' = ' + formatUSD(l.qte * l.prixUnitaireUSD));
   const sortie = [
-    '*' + (App.reglages.nomBoutique || 'AIVA Caisse') + '*',
+    '*' + (App.reglages.nomBoutique || 'EvoBuskin') + '*',
     'Reçu n° ' + vente.id + ' - ' + formatDateHeure(vente.date),
     '--------------------',
     ...lignes,
@@ -93,10 +93,11 @@ const VueCaisse = {
     grille.innerHTML = liste.map((p) => {
       const ligne = this.panier.find((l) => l.produitId === p.id);
       const rupture = p.stock <= 0;
-      return '<button class="produit ' + (rupture ? 'rupture' : '') + '" data-id="' + p.id + '">' +
+      const sansPrix = prixAFixer(p);
+      return '<button class="produit ' + ((rupture || sansPrix) ? 'rupture' : '') + '" data-id="' + p.id + '">' +
         (ligne ? '<span class="p-qte">' + formatQuantite(ligne.qte) + '</span>' : '') +
         '<span class="p-nom">' + esc(p.nom) + '</span>' +
-        '<span class="p-prix">' + prixProduit(p) + '</span>' +
+        (sansPrix ? '<span class="p-prix" style="color:var(--couleur-alerte)">Prix à fixer</span>' : '<span class="p-prix">' + prixProduit(p) + '</span>') +
         '<span class="p-stock">' + (rupture ? 'Rupture de stock' : 'Stock : ' + formatQuantite(p.stock)) + '</span>' +
         '</button>';
     }).join('');
@@ -107,6 +108,10 @@ const VueCaisse = {
   ajouter(idProduit, quantite = 1) {
     const p = this.produits.find((x) => x.id === idProduit);
     if (!p) return false;
+    if (prixAFixer(p)) {
+      toast(App.estPatron() ? 'Le prix de « ' + p.nom + ' » n\'est pas encore fixé : allez dans Stock, touchez le produit puis Modifier.' : 'Le prix de « ' + p.nom + ' » n\'est pas encore fixé : demandez au patron.', 'erreur');
+      return false;
+    }
     if (p.stock <= 0) { toast('« ' + p.nom + ' » est en rupture de stock', 'erreur'); return false; }
     let ligne = this.panier.find((l) => l.produitId === idProduit);
     const nouvelle = (ligne ? ligne.qte : 0) + quantite;
@@ -241,7 +246,7 @@ const VueCaisse = {
         '<div id="nouveauClient" hidden><div class="deux-colonnes">' +
           '<label class="champ"><span>Nom</span><input id="ncNom" autocomplete="off"></label>' +
           '<label class="champ"><span>Téléphone</span><input id="ncTel" inputmode="tel" autocomplete="off" placeholder="08..."></label>' +
-        '</div></div>' +
+        '</div><div class="bandeau rouge" id="ncErreur" hidden></div></div>' +
       '</div>' +
       '<button class="btn" id="validerVente">Valider la vente</button>');
 
@@ -303,7 +308,12 @@ const VueCaisse = {
         if (choix === 'new') {
           const nom = $('#ncNom', el).value.trim();
           if (!nom) { toast('Écrivez le nom du nouveau client', 'erreur'); return; }
-          client = { nom, tel: $('#ncTel', el).value.trim() };
+          const telSaisi = $('#ncTel', el).value.trim();
+          const refus = (m) => { const e = $('#ncErreur', el); e.textContent = m; e.hidden = false; toast('Client non enregistré', 'erreur'); };
+          if (telSaisi && normaliserTel(telSaisi).length < 11) { refus('Numéro de téléphone trop court.'); return; }
+          const doublon = VueDettes.verifierClient(nom, telSaisi, clients, null); // même nom ou même numéro : refusé
+          if (doublon) { refus(doublon + ' Choisissez-le dans la liste ou changez le nom ou le numéro.'); return; }
+          client = { nom, tel: telSaisi };
         } else {
           clientId = Number(choix);
           client = clients.find((x) => x.id === clientId);
@@ -346,17 +356,17 @@ const VueCaisse = {
     });
   },
 
+  // Le reçu WhatsApp n'est proposé que pour une vente à crédit (le client garde une preuve de sa dette).
   afficherRecu(vente, client) {
     const texte = construireRecu(vente, client);
+    const aCredit = vente.resteUSD > 0.005 && !!client;
     const f = ouvrirFenetre('Vente enregistrée',
       '<div class="recu">' + esc(texte.replace(/\*/g, '')) + '</div>' +
       '<div class="pile">' +
-        '<button class="btn" id="recuWa">Envoyer le reçu sur WhatsApp</button>' +
-        '<button class="btn contour" id="recuImp">Imprimer le ticket</button>' +
+        (aCredit ? '<button class="btn" id="recuWa">Envoyer le reçu à ' + esc(client.nom) + ' sur WhatsApp</button>' : '') +
         '<button class="btn gris" id="recuOk">Nouvelle vente</button>' +
       '</div>');
-    $('#recuWa', f.el).addEventListener('click', () => ouvrirLien(lienWhatsApp(client ? client.tel : '', texte)));
-    $('#recuImp', f.el).addEventListener('click', () => Imprimante.imprimerVente(vente, client));
+    if (aCredit) $('#recuWa', f.el).addEventListener('click', () => ouvrirLien(lienWhatsApp(client.tel, texte)));
     $('#recuOk', f.el).addEventListener('click', () => f.fermer());
   }
 };

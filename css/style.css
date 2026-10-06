@@ -1,7 +1,7 @@
-/* AIVA Caisse - styles
+/* EvoBuskin - styles
    POUR CHANGER LES COULEURS : modifiez uniquement les variables ci-dessous (bloc :root). */
 :root {
-  --couleur-principale: #0b7a3e;   /* vert AIVA : barre du haut, boutons */
+  --couleur-principale: #0b7a3e;   /* vert : barre du haut, boutons */
   --couleur-principale-fonce: #075c2e;
   --couleur-accent: #f2b705;       /* jaune : mises en avant */
   --couleur-danger: #c62828;       /* rouge : ruptures, dettes, suppression */
@@ -32,7 +32,7 @@ p { margin: 0 0 10px; }
 
 /* ---------- Chargement ---------- */
 #chargement {
-  position: fixed; inset: 0; background: var(--couleur-principale); color: #fff; z-index: 100;
+  position: fixed; inset: 0; background: #060d1f; color: #fff; z-index: 100;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font-weight: 700;
 }
 .logo-rond {
@@ -222,3 +222,36 @@ p { margin: 0 0 10px; }
 details.options { background: #f6f8f7; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
 details.options summary { font-weight: 700; color: var(--couleur-principale); cursor: pointer; }
 details.options[open] summary { margin-bottom: 8px; }
+
+/* ---------- Logo EvoBuskin ---------- */
+#chargement img, .logo-login { border-radius: 22%; }
+.logo-login { width: 96px; height: 96px; box-shadow: 0 4px 14px rgba(6,13,31,.35); }
+
+/* ---------- Calendrier de choix de période ---------- */
+.cal-tete { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px; }
+.cal-nav { width: 44px; height: 44px; border: 0; border-radius: 50%; background: #e4e9e6; font-size: 1.6rem; line-height: 1; color: var(--couleur-principale); cursor: pointer; }
+.cal-nav[disabled] { opacity: .3; cursor: default; }
+.cal-titre { border: 0; background: none; font-size: 1.1rem; font-weight: 800; text-transform: capitalize; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+button.cal-titre:active { background: #e4e9e6; }
+div.cal-titre { cursor: default; }
+.cal-sem, .cal-grille { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-sem span { text-align: center; font-size: .75rem; font-weight: 700; color: var(--couleur-texte-doux); padding: 4px 0 6px; }
+.cal-grille { row-gap: 2px; }
+.cal-j { position: relative; height: 48px; padding: 0; border: 0; background: none; cursor: pointer; }
+.cal-j span { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 2px auto 0; border-radius: 50%; font-weight: 600; font-size: 1rem; }
+.cal-j:active span { background: #e4e9e6; }
+.cal-j.auj span { box-shadow: inset 0 0 0 2px var(--couleur-principale); color: var(--couleur-principale); }
+.cal-j.mil { background: #dff1e6; }
+.cal-j.deb.plage { background: linear-gradient(to right, transparent 50%, #dff1e6 50%); }
+.cal-j.fin.plage { background: linear-gradient(to left, transparent 50%, #dff1e6 50%); }
+.cal-j.deb span, .cal-j.fin span, .cal-j.seul span { background: var(--couleur-principale); color: #fff; box-shadow: none; }
+.cal-j.futur { cursor: default; }
+.cal-j.futur span { color: #b4bdb8; }
+.cal-j .pt, .pt-l { position: absolute; z-index: 2; bottom: 1px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: var(--couleur-accent); }
+.cal-resume { margin: 14px 0 2px; padding: 12px; border-radius: 12px; background: #f0f4f2; text-align: center; min-height: 64px; display: flex; flex-direction: column; justify-content: center; }
+.cal-legende { margin-top: 10px; text-align: center; font-size: .8rem; color: var(--couleur-texte-doux); }
+.pt-l { position: static; display: inline-block; margin: 0 4px 1px 0; }
+.cal-mois-grille { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 4px; }
+.cal-mois-grille button { padding: 16px 4px; border: 1.5px solid var(--couleur-bordure); border-radius: 12px; background: #fff; font-weight: 700; text-transform: capitalize; cursor: pointer; }
+.cal-mois-grille button.actif { border-color: var(--couleur-principale); background: #e9f6ee; color: var(--couleur-principale); }
+.cal-mois-grille button[disabled] { opacity: .35; }

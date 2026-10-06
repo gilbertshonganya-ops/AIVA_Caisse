@@ -1,4 +1,4 @@
-/* AIVA Caisse - IMPORT de produits depuis un fichier Excel (.xlsx) ou CSV (patron)
+/* EvoBuskin - IMPORT de produits depuis un fichier Excel (.xlsx) ou CSV (patron)
    Le fichier .xlsx est lu directement dans le téléphone (aucune bibliothèque, aucun envoi sur Internet).
    Les anciens fichiers .xls (Excel 97-2003) ne sont pas lus : les enregistrer en .xlsx ou en CSV. */
 

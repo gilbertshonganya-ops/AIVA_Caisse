@@ -1,13 +1,13 @@
 {
-  "name": "AIVA Caisse",
-  "short_name": "AIVA Caisse",
+  "name": "EvoBuskin",
+  "short_name": "EvoBuskin",
   "description": "Caisse, stock et dettes clients, même sans Internet.",
   "lang": "fr",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b7a3e",
+  "background_color": "#060d1f",
   "theme_color": "#0b7a3e",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

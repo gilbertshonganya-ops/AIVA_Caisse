@@ -1,4 +1,4 @@
-/* AIVA Caisse - écran RÉGLAGES (patron) : boutique, taux, PIN, sauvegarde, démo */
+/* EvoBuskin - écran RÉGLAGES (patron) : boutique, taux, PIN, sauvegarde, démo */
 const VueReglages = {
   async afficher(conteneur) {
     const r = App.reglages;
@@ -31,26 +31,15 @@ const VueReglages = {
           '<button class="btn gris" id="rCsvStock">Exporter le stock (Excel/CSV)</button>' +
         '</div><p class="petit" style="margin-top:10px">La sauvegarde protégée est chiffrée (AES-256). Sans le mot de passe, personne ne peut la rouvrir, pas même nous.</p></div>' +
 
-      '<div class="carte"><h3>Imprimante de tickets</h3><div style="height:8px"></div>' +
-        '<label class="champ"><span>Mode d\'impression</span><select id="rImpMode">' +
-          '<option value="systeme">Impression du téléphone / PDF</option>' +
-          '<option value="ble">Bluetooth direct (imprimante Bluetooth LE)</option>' +
-          '<option value="rawbt">Application RawBT (Bluetooth classique)</option></select></label>' +
-        '<label class="champ"><span>Largeur du papier</span><select id="rImpLarg"><option value="32">58 mm (32 caractères)</option><option value="48">80 mm (48 caractères)</option></select></label>' +
-        '<div class="pile"><button class="btn" id="rImpSave">Enregistrer</button><button class="btn gris" id="rImpTest">Imprimer un ticket de test</button><button class="btn gris" id="rImpOublier">Choisir une autre imprimante</button></div>' +
-        '<p class="petit" style="margin-top:10px">Le mode Bluetooth direct ne marche qu\'avec les imprimantes Bluetooth LE, dans Chrome Android. Si votre imprimante n\'apparaît pas, installez l\'application gratuite RawBT et choisissez ce mode.</p></div>' +
-
       '<div class="carte"><h3>Données</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn contour" id="rDemo">Charger les données de démonstration</button>' +
         '<button class="btn rouge" id="rEffacer">Tout effacer</button></div></div>' +
 
       '<div class="carte"><h3>Application</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn gris" id="rInstall">Installer sur l\'écran d\'accueil</button>' +
-        '<p class="petit texte-centre">AIVA Caisse version 1.1.0 &middot; fonctionne hors connexion</p></div></div>';
+        '<p class="petit texte-centre">EvoBuskin version 1.2.0 &middot; fonctionne hors connexion</p></div></div>';
 
     $('#rAff').value = r.affichage;
-    $('#rImpMode').value = r.imprimeMode || 'systeme';
-    $('#rImpLarg').value = String(r.imprimeLargeur || 32);
 
     $('#rSaveBoutique').addEventListener('click', async () => {
       const nom = $('#rNom').value.trim();
@@ -85,23 +74,12 @@ const VueReglages = {
 
     $('#rExport').addEventListener('click', async () => {
       const sauvegarde = await DB.exporterTout();
-      await enregistrerFichier('aiva-caisse-sauvegarde-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(sauvegarde), 'application/json');
+      await enregistrerFichier('evobuskin-sauvegarde-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(sauvegarde), 'application/json');
       await App.sauverReglage('derniereSauvegarde', Date.now());
       Audit.log('sauvegarde', { chiffree: false });
       toast('Sauvegarde créée. Gardez le fichier en lieu sûr.', 'ok'); App.rafraichir();
     });
     $('#rExportChiffre').addEventListener('click', () => this.sauvegardeChiffree());
-    $('#rImpSave').addEventListener('click', async () => {
-      await App.sauverReglage('imprimeMode', $('#rImpMode').value);
-      await App.sauverReglage('imprimeLargeur', Number($('#rImpLarg').value));
-      toast('Imprimante enregistrée', 'ok');
-    });
-    $('#rImpTest').addEventListener('click', async () => {
-      await App.sauverReglage('imprimeMode', $('#rImpMode').value);
-      await App.sauverReglage('imprimeLargeur', Number($('#rImpLarg').value));
-      Imprimante.imprimerTest();
-    });
-    $('#rImpOublier').addEventListener('click', () => { Imprimante.oublier(); toast('Au prochain ticket, choisissez votre imprimante'); });
     $('#rImport').addEventListener('click', () => $('#fichierImport').click());
     $('#fichierImport').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; this.restaurer(f); }); // value vidée : on peut rechoisir le même fichier
     $('#rCsvVentes').addEventListener('click', () => this.exporterCsvVentes());
@@ -142,7 +120,7 @@ const VueReglages = {
       toast('Chiffrement en cours...');
       const donnees = await DB.exporterTout();
       const fichier = await Coffre.chiffrer(JSON.stringify(donnees), mdp);
-      await enregistrerFichier('aiva-caisse-sauvegarde-protegee-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(fichier), 'application/json');
+      await enregistrerFichier('evobuskin-sauvegarde-protegee-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(fichier), 'application/json');
       await App.sauverReglage('derniereSauvegarde', Date.now());
       Audit.log('sauvegarde', { chiffree: true });
       toast('Sauvegarde protégée créée', 'ok'); App.rafraichir();
@@ -158,7 +136,7 @@ const VueReglages = {
         if (!mdp) return;
         sauvegarde = JSON.parse(await Coffre.dechiffrer(sauvegarde, mdp));
       }
-      if (!sauvegarde || sauvegarde.application !== 'AIVA Caisse') throw new Error('Ce fichier n\'est pas une sauvegarde AIVA Caisse');
+      if (!sauvegarde || !['EvoBuskin', 'AIVA Caisse'].includes(sauvegarde.application)) throw new Error('Ce fichier n\'est pas une sauvegarde EvoBuskin');
       const n = (sauvegarde.donnees.produits || []).length;
       if (!(await confirmer('Restaurer la sauvegarde', 'Cela REMPLACE toutes les données actuelles par celles du fichier (' + n + ' produits). Continuer ?', 'Restaurer', true))) return;
       // Le journal d'audit de ce téléphone est conservé s'il existe (sinon on prend celui de la sauvegarde)
@@ -210,12 +188,12 @@ const VueReglages = {
       arrondi(v.totalUSD, 2), Math.round(v.totalUSD * v.taux), arrondi(v.totalUSD - (v.coutUSD || 0), 2),
       LIBELLES_MODE[v.mode] || v.mode, v.reference || '', arrondi(v.payeUSD, 2), arrondi(v.resteUSD || 0, 2), v.vendeur || '', v.annulee ? 'oui' : 'non'
     ]));
-    await enregistrerFichier('aiva-caisse-ventes.csv', this.csv(lignes), 'text/csv');
+    await enregistrerFichier('evobuskin-ventes.csv', this.csv(lignes), 'text/csv');
   },
   async exporterCsvStock() {
     const produits = (await DB.tout('produits')).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     const lignes = [['Produit', 'Catégorie', 'Code-barres', 'Devise', 'Prix achat', 'Prix vente', 'Stock', 'Seuil alerte']];
     produits.forEach((p) => lignes.push([p.nom, p.categorie, p.codeBarres, p.devise, p.prixAchat, p.prixVente, p.stock, p.seuil]));
-    await enregistrerFichier('aiva-caisse-stock.csv', this.csv(lignes), 'text/csv');
+    await enregistrerFichier('evobuskin-stock.csv', this.csv(lignes), 'text/csv');
   }
 };
