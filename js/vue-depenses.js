@@ -3,7 +3,7 @@
 const CATEGORIES_DEPENSES = ['Loyer', 'Électricité', 'Eau', 'Transport', 'Salaires', 'Internet et crédit téléphone', 'Taxes et patentes', 'Entretien et réparations', 'Emballages et sacs', 'Autre'];
 
 const VueDepenses = {
-  periode: Periode.nouveau('semaine'),
+  periode: Periode.nouveau('jour'),
 
   async afficher(conteneur) {
     const toutes = await DB.tout('depenses');

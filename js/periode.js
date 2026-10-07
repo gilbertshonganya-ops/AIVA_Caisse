@@ -1,9 +1,9 @@
-/* EvoBuskin - choix d'une période : aujourd'hui, hier, cette semaine, toutes les dates,
-   ou le calendrier (une date, ou de telle date à telle date).
+/* EvoBuskin - choix d'une période : "Aujourd'hui" ou "Autre date" (calendrier : une date, ou de telle date à telle date).
    Utilisé par les écrans Rapports et Dépenses. */
 const Periode = (() => {
-  // Raccourcis affichés (les périodes "mois" et "année" restent possibles par le calendrier : on évite d'encombrer l'écran)
-  const PRESETS = [['jour', 'Aujourd\'hui'], ['hier', 'Hier'], ['semaine', 'Cette semaine'], ['tout', 'Toutes les dates'], ['perso', '\u{1F4C5} Calendrier']];
+  // Deux onglets seulement : "Aujourd'hui" et "Autre date" (qui ouvre le calendrier : une date, ou une période).
+  // Les autres types (hier, semaine, mois, année, tout) restent gérés par bornes() mais ne sont plus proposés.
+  const PRESETS = [['jour', 'Aujourd\'hui'], ['perso', 'Autre date']];
 
   const jourSuivant = (t, n = 1) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
   const iso = (t) => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
