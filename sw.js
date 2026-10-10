@@ -2,18 +2,10 @@
    Met en cache tous les fichiers de l'application pour qu'elle marche SANS Internet.
    IMPORTANT : quand vous modifiez un fichier, changez le numéro de VERSION ci-dessous
    pour que les téléphones téléchargent la nouvelle version. */
-const VERSION = 'evobuskin-v1.2.0';
+const VERSION = 'evobuskin-v1.3.0';
 const FICHIERS = [
-  './', './index.html', './manifest.webmanifest',
-  './css/style.css',
-  './js/utils.js', './js/periode.js', './js/db.js', './js/audit.js', './js/pdf.js', './js/coffre.js',
-  './js/scanner.js', './js/demo.js',
-  './js/vue-caisse.js', './js/vue-stock.js', './js/vue-dettes.js', './js/vue-depenses.js',
-  './js/vue-achats.js', './js/vue-import.js', './js/vue-audit.js', './js/vue-rapports.js',
-  './js/vue-plus.js', './js/vue-reglages.js', './js/app.js',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',
-  './icons/apple-touch-icon.png', './icons/logo.png'
-];
+  './js/auth-config.js', './js/auth.js', './js/auth-ui.js', './js/cloud-db.js',
+'./js/sync.js', './js/security-monitor.js', './js/subscriptions.js',
 
 // Installation : on télécharge tous les fichiers dans le cache
 self.addEventListener('install', (e) => {

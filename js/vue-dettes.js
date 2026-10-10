@@ -11,7 +11,7 @@ const VueDettes = {
   },
 
   async afficher(conteneur) {
-    this.clients = await DB.tout('clients');
+    this.clients = (await DB.tout('clients')).filter((c) => c.actif !== false);
     this.mouvements = await DB.tout('dettes');
     const soldes = this.clients.map((c) => ({ c, solde: this.solde(c.id) }));
     const totalDu = soldes.reduce((s, x) => s + Math.max(0, x.solde), 0);
@@ -73,9 +73,20 @@ const VueDettes = {
       const tel = $('#cTel', f.el).value.trim();
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
       if (tel && normaliserTel(tel).length < 11) { montrerErreur('Numéro de téléphone trop court.'); return; }
-      const doublon = this.verifierClient(nom, tel, await DB.tout('clients'), client ? client.id : null);
+      const doublon = this.verifierClient(nom, tel, (await DB.tout('clients')).filter((c) => c.actif !== false), client ? client.id : null);
       if (doublon) { montrerErreur(doublon); return; }
-      await DB.ecrire('clients', Object.assign({}, client || {}, { nom, tel }));
+      const localClient = Object.assign({}, client || {}, { nom, tel, actif: true });
+      await DB.ecrire('clients', localClient);
+      try {
+        await SyncManager.mettreEnFile('customer_upsert', {
+          p_local_id: localClient.id,
+          p_customer_id: localClient.cloudId || null,
+          p_nom: nom,
+          p_tel: tel || null,
+          p_email: localClient.email || null,
+          p_adresse: localClient.adresse || null
+        });
+      } catch (_) { /* mode local : la synchronisation sera réessayée après reconnexion */ }
       f.fermer(); toast('Client enregistré', 'ok'); App.rafraichir();
     });
   },
@@ -92,7 +103,7 @@ const VueDettes = {
       '<div class="pile">' +
         (solde > 0.005 ? '<button class="btn" id="dPaie">Enregistrer un paiement</button>' : '') +
         (solde > 0.005 ? '<button class="btn contour" id="dRappel">Envoyer un rappel WhatsApp</button>' : '') +
-        '<button class="btn gris" id="dDette">Ajouter une dette (ancien cahier)</button>' +
+        (App.estPatron() ? '<button class="btn gris" id="dDette">Ajouter une dette (ancien cahier)</button>' : '') +
         '<div class="ligne-boutons"><button class="btn gris" id="dModif">Modifier</button>' +
         (App.estPatron() ? '<button class="btn rouge" id="dSuppr">Supprimer</button>' : '') + '</div>' +
       '</div>' +
@@ -111,16 +122,23 @@ const VueDettes = {
         formatUSD(solde) + ' (' + formatCDF(solde * App.taux()) + '). Merci de passer la régler dès que possible. Merci beaucoup !';
       ouvrirLien(lienWhatsApp(client.tel, msg));
     });
-    $('#dDette', f.el).addEventListener('click', () => { f.fermer(); this.formulaireDette(client); });
+    const detteBtn = $('#dDette', f.el);
+    if (detteBtn) detteBtn.addEventListener('click', () => { f.fermer(); this.formulaireDette(client); });
     $('#dModif', f.el).addEventListener('click', () => { f.fermer(); this.formulaireClient(client); });
     const suppr = $('#dSuppr', f.el);
     if (suppr) suppr.addEventListener('click', async () => {
       const msg = solde > 0.005 ? client.nom + ' doit encore ' + formatUSD(solde) + '. Supprimer quand même efface aussi son historique.' : 'Supprimer ce client et son historique ?';
-      if (await confirmer('Supprimer le client', msg, 'Supprimer', true)) {
-        for (const m of histo) await DB.supprimer('dettes', m.id);
-        await DB.supprimer('clients', client.id);
-        Audit.log('client_supprime', { nom: client.nom, soldeUSD: arrondi(solde, 2) });
-        f.fermer(); toast('Client supprimé'); App.rafraichir();
+      if (await confirmer('Désactiver le client', msg + ' Le client sera désactivé, sans supprimer son historique.', 'Désactiver', true)) {
+        const localClient = Object.assign({}, client, { actif: false });
+        await DB.ecrire('clients', localClient);
+        try {
+          await SyncManager.mettreEnFile('customer_deactivate', {
+            p_customer_id: client.cloudId || null,
+            p_customer_local_id: client.id
+          });
+        } catch (_) { /* sera synchronisé plus tard */ }
+        Audit.log('client_desactive', { nom: client.nom, soldeUSD: arrondi(solde, 2) });
+        f.fermer(); toast('Client désactivé', 'ok'); App.rafraichir();
       }
     });
   },
@@ -153,11 +171,23 @@ const VueDettes = {
       if (isNaN(v) || v <= 0) { toast('Entrez un montant supérieur à 0', 'erreur'); return; }
       const usd = arrondi(versUSD(v, etat.devise, App.taux()), 6);
       if (usd > solde + 0.01) { toast('Le montant dépasse la dette (' + formatUSD(solde) + ')', 'erreur'); return; }
-      await DB.ajouter('dettes', {
-        clientId: client.id, date: Date.now(), type: 'paiement', montantUSD: Math.min(usd, solde),
+      const montantUSD = Math.min(usd, solde);
+      const paiementLocalId = await DB.ajouter('dettes', {
+        clientId: client.id, date: Date.now(), type: 'paiement', montantUSD,
         mode: $('#mMode', f.el).value, devise: etat.devise, note: $('#mNote', f.el).value.trim()
       });
-      Audit.log('paiement_dette', { client: client.nom, montant: arrondi(Math.min(usd, solde), 2) + ' USD' });
+      try {
+        await SyncManager.mettreEnFile('customer_payment', {
+          p_local_id: paiementLocalId,
+          p_customer_local_id: client.id,
+          p_customer_id: client.cloudId || null,
+          p_amount: v,
+          p_currency: etat.devise,
+          p_mode: $('#mMode', f.el).value,
+          p_note: $('#mNote', f.el).value.trim()
+        });
+      } catch (_) { /* mode offline : la dette sera synchronisée ultérieurement */ }
+      Audit.log('paiement_dette', { client: client.nom, montant: arrondi(montantUSD, 2) + ' USD' });
       f.fermer(); toast('Paiement enregistré', 'ok'); App.rafraichir();
     });
   },
@@ -171,10 +201,20 @@ const VueDettes = {
     $('#mOk', f.el).addEventListener('click', async () => {
       const v = lireNombre($('#mMontant', f.el).value);
       if (isNaN(v) || v <= 0) { toast('Entrez un montant supérieur à 0', 'erreur'); return; }
-      await DB.ajouter('dettes', {
+      const detteLocalId = await DB.ajouter('dettes', {
         clientId: client.id, date: Date.now(), type: 'dette', montantUSD: arrondi(versUSD(v, etat.devise, App.taux()), 6),
         devise: etat.devise, note: $('#mNote', f.el).value.trim()
       });
+      try {
+        await SyncManager.mettreEnFile('customer_debt', {
+          p_local_id: detteLocalId,
+          p_customer_local_id: client.id,
+          p_customer_id: client.cloudId || null,
+          p_amount: v,
+          p_currency: etat.devise,
+          p_note: $('#mNote', f.el).value.trim()
+        });
+      } catch (_) { /* mode offline : la dette sera synchronisée ultérieurement */ }
       Audit.log('dette_ajoutee', { client: client.nom, montant: arrondi(versUSD(v, etat.devise, App.taux()), 2) + ' USD' });
       f.fermer(); toast('Dette enregistrée', 'ok'); App.rafraichir();
     });

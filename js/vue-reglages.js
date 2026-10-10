@@ -1,4 +1,4 @@
-/* EvoBuskin - écran RÉGLAGES (patron) : boutique, taux, PIN, sauvegarde, démo */
+/* EvoBuskin - écran RÉGLAGES (patron) : boutique, taux, sauvegarde, démo */
 const VueReglages = {
   async afficher(conteneur) {
     const r = App.reglages;
@@ -13,12 +13,6 @@ const VueReglages = {
         '<label class="champ"><span>Devise affichée en grand</span><select id="rAff"><option value="USD">Dollars ($)</option><option value="CDF">Francs (FC)</option></select></label>' +
         '<p class="petit">Les anciennes ventes gardent le taux du jour où elles ont été faites. Pensez à mettre à jour le taux chaque matin.</p>' +
         '<button class="btn" id="rSaveTaux">Enregistrer</button></div>' +
-
-      '<div class="carte"><h3>Codes PIN</h3><div style="height:8px"></div>' +
-        '<label class="champ"><span>Nouveau PIN du patron (4 chiffres)</span><input id="rPinP" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></label>' +
-        '<label class="champ"><span>Nouveau PIN du vendeur (4 chiffres)</span><input id="rPinV" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></label>' +
-        '<p class="petit">Laissez vide ce que vous ne voulez pas changer. Le PIN protège contre un regard curieux : gardez aussi le téléphone en lieu sûr.</p>' +
-        '<button class="btn" id="rSavePin">Changer les PIN</button></div>' +
 
       '<div class="carte"><h3>Sauvegarde</h3><div style="height:8px"></div>' +
         '<p class="petit">' + (r.derniereSauvegarde ? 'Dernière sauvegarde : ' + formatDateHeure(r.derniereSauvegarde) : 'Aucune sauvegarde faite.') + '</p>' +
@@ -54,22 +48,15 @@ const VueReglages = {
       if (isNaN(t) || t < 1 || t > 100000) { toast('Taux invalide (exemple : 2800)', 'erreur'); return; }
       const ancienTaux = r.taux;
       await App.sauverReglage('taux', t);
-      if (Number(ancienTaux) !== t) Audit.log('taux_modifie', { taux: [ancienTaux, t] });
+      if (Number(ancienTaux) !== t) {
+        try {
+          await SyncManager.mettreEnFile('exchange_rate', { p_rate: t });
+        } catch (_) {}
+        Audit.log('taux_modifie', { taux: [ancienTaux, t] });
+      }
       await App.sauverReglage('affichage', $('#rAff').value);
       toast('Taux enregistré : 1 $ = ' + formatCDF(t), 'ok');
       VueCaisse.panier = []; // les prix du panier dépendent du taux : on repart propre
-    });
-
-    $('#rSavePin').addEventListener('click', async () => {
-      const p = $('#rPinP').value.trim(), v = $('#rPinV').value.trim();
-      if (!p && !v) { toast('Rien à changer', 'erreur'); return; }
-      if ((p && !/^\d{4}$/.test(p)) || (v && !/^\d{4}$/.test(v))) { toast('Un PIN doit avoir exactement 4 chiffres', 'erreur'); return; }
-      const hp = p ? hacher(p) : r.pinPatron, hv = v ? hacher(v) : r.pinVendeur;
-      if (hp === hv) { toast('Le PIN du patron et du vendeur doivent être différents', 'erreur'); return; }
-      if (p) { await App.sauverReglage('pinPatron', hp); await App.sauverReglage('pinChange', true); }
-      if (v) await App.sauverReglage('pinVendeur', hv);
-      Audit.log('pin_modifie', { patron: !!p, vendeur: !!v });
-      toast('PIN modifié(s)', 'ok'); App.rafraichir();
     });
 
     $('#rExport').addEventListener('click', async () => {

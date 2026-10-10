@@ -36,7 +36,7 @@ const VueCaisse = {
   produits: [],
 
   async afficher(conteneur) {
-    this.produits = await DB.tout('produits');
+    this.produits = (await DB.tout('produits')).filter((p) => p.actif !== false);
     const bandeaux = await App.bandeaux();
     conteneur.innerHTML =
       bandeaux +
@@ -322,36 +322,70 @@ const VueCaisse = {
       bouton.disabled = true;
       try {
         if (client && !clientId) { clientId = await DB.ajouter('clients', client); client.id = clientId; }
+        const idempotencyKey = SyncManager.uuid();
+        const reference = $('#reference', el).value.trim();
+        const lignesLocal = this.panier.map((l) => ({
+          produitId: l.produitId,
+          nom: l.nom,
+          qte: l.qte,
+          facteur: l.facteur || 1,
+          prixUnitaireUSD: arrondi(totalLigne(l) / l.qte, 6),
+          prixAchatUSD: arrondi(l.coutUSD, 6)
+        }));
         const vente = {
           date: Date.now(),
-          lignes: this.panier.map((l) => ({
-            produitId: l.produitId, nom: l.nom, qte: l.qte,
-            prixUnitaireUSD: arrondi(totalLigne(l) / l.qte, 6), prixAchatUSD: arrondi(l.coutUSD, 6)
-          })),
+          lignes: lignesLocal,
           totalUSD: total,
           coutUSD: arrondi(this.panier.reduce((s, l) => s + l.qte * l.coutUSD, 0), 6),
           taux,
           mode: etat.mode,
           devisePaiement: etat.devise,
-          reference: $('#reference', el).value.trim(),
+          reference,
           clientId,
           payeUSD: c.paye,
           resteUSD: c.reste,
           vendeur: App.nomVendeur(),
-          annulee: false
+          annulee: false,
+          idempotencyKey
         };
-        const enregistree = await DB.enregistrerVente(vente);
+        // La vente locale et sa file de synchronisation sont atomiques.
+        // Les prix présents ici servent à l'affichage/reçu seulement : le serveur
+        // les ignore et recalcule le total depuis son propre catalogue.
+        const cloudPayload = {
+          p_local_id: null,
+          p_date: new Date(vente.date).toISOString(),
+          p_client_id: null,
+          p_client_local_id: clientId || null,
+          p_paye: c.paye,
+          p_devise: 'USD',
+          p_lignes: lignesLocal.map((l) => ({
+            produitLocalId: l.produitId,
+            qte: l.qte,
+            facteur: l.facteur || 1
+          })),
+          p_metadata: {
+            mode: etat.mode,
+            devise_paiement: etat.devise,
+            reference: reference || null,
+            source: 'mobile_offline_queue'
+          }
+        };
+        const enregistree = await DB.enregistrerVenteEtMettreEnFile(vente, {
+          businessId: App.businessId,
+          idempotencyKey,
+          payload: cloudPayload
+        });
         Audit.log('vente', { id: enregistree.id, total: arrondi(total, 2) + ' USD', mode: etat.mode, reste: arrondi(c.reste, 2) + ' USD' });
         this.panier = [];
         f.fermer();
-        this.produits = await DB.tout('produits');
+        this.produits = (await DB.tout('produits')).filter((p) => p.actif !== false);
         this.dessinerGrille();
         this.dessinerBarrePanier();
         this.afficherRecu(enregistree, client);
       } catch (e) {
         bouton.disabled = false;
         toast(e.message || 'Erreur pendant l\'enregistrement', 'erreur');
-        this.produits = await DB.tout('produits'); // le stock a peut-être changé
+        this.produits = (await DB.tout('produits')).filter((p) => p.actif !== false); // le stock a peut-être changé
       }
     });
   },

@@ -62,6 +62,12 @@ const VueDepenses = {
         note: $('#dNote', f.el).value.trim(), vendeur: App.nomVendeur()
       };
       const id = await DB.ajouter('depenses', dep);
+      try {
+        await SyncManager.mettreEnFile('expense', {
+          p_local_id: id, p_date: new Date(dep.date).toISOString(), p_categorie: dep.categorie,
+          p_amount: dep.montant, p_currency: dep.devise, p_note: dep.note
+        });
+      } catch (_) {}
       Audit.noter('Dépense ajoutée', 'n°' + id + ' ' + dep.categorie + ' ' + formatUSD(dep.montantUSD));
       f.fermer(); toast('Dépense enregistrée', 'ok'); this.afficher($('#vue'));
     });
@@ -76,9 +82,7 @@ const VueDepenses = {
       '<button class="btn rouge" id="dSuppr">Supprimer cette dépense</button>');
     $('#dSuppr', f.el).addEventListener('click', async () => {
       if (!(await confirmer('Supprimer la dépense', 'Supprimer cette dépense de ' + formatUSD(d.montantUSD) + ' ?', 'Supprimer', true))) return;
-      await DB.supprimer('depenses', d.id);
-      Audit.noter('Dépense supprimée', 'n°' + d.id + ' ' + d.categorie + ' ' + formatUSD(d.montantUSD));
-      f.fermer(); toast('Dépense supprimée'); this.afficher($('#vue'));
+      toast('Une dépense financière ne doit pas être effacée physiquement. La fonction d\'annulation sécurisée sera ajoutée dans une prochaine migration.', 'erreur');
     });
   }
 };

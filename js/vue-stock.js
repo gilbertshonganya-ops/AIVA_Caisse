@@ -18,7 +18,7 @@ const VueStock = {
   },
 
   async afficher(conteneur) {
-    this.produits = await DB.tout('produits');
+    this.produits = (await DB.tout('produits')).filter((p) => p.actif !== false);
     const nbAlertes = this.produits.filter((p) => this.etat(p) !== 'ok').length;
     const nbSansPrix = this.produits.filter(prixAFixer).length;
     let valeur = 0;
@@ -100,9 +100,11 @@ const VueStock = {
       $('#bModif', f.el).addEventListener('click', () => { f.fermer(); this.formulaire(p); });
       $('#bSuppr', f.el).addEventListener('click', async () => {
         if (await confirmer('Supprimer le produit', 'Supprimer « ' + p.nom + ' » ? Les anciennes ventes restent dans les rapports.', 'Supprimer', true)) {
-          await DB.supprimer('produits', p.id);
-          Audit.log('produit_supprime', { nom: p.nom, stock: p.stock });
-          f.fermer(); toast('Produit supprimé'); App.rafraichir();
+          p.actif = false;
+          await DB.ecrire('produits', p);
+          await SyncManager.mettreEnFile('product_deactivate', { p_product_id: null, p_local_id: p.id });
+          Audit.log('produit_desactive', { nom: p.nom, stock: p.stock });
+          f.fermer(); toast('Produit désactivé', 'ok'); App.rafraichir();
         }
       });
     }
@@ -126,8 +128,12 @@ const VueStock = {
       if (isNaN(q) || q <= 0) { toast('Entrez une quantité supérieure à 0', 'erreur'); return; }
       if (!entree && q > p.stock) { toast('Impossible : il ne reste que ' + formatQuantite(p.stock), 'erreur'); return; }
       try {
-        await DB.ajusterStock(p.id, entree ? q : -q, type, $('#mNote', f.el).value.trim(), App.nomVendeur());
-        Audit.log(entree ? 'stock_entree' : 'stock_sortie', { produit: p.nom, qte: q, note: $('#mNote', f.el).value.trim() });
+        const note = $('#mNote', f.el).value.trim();
+        const delta = entree ? q : -q;
+        const expectedStock = p.stock;
+        await DB.ajusterStock(p.id, delta, type, note, App.nomVendeur());
+        await SyncManager.mettreEnFile('stock_adjust', { p_product_id: null, p_local_id: p.id, p_delta: arrondi(delta, 3), p_type: type, p_note: note, p_expected_stock: arrondi(expectedStock, 3) });
+        Audit.log(entree ? 'stock_entree' : 'stock_sortie', { produit: p.nom, qte: q, note });
         f.fermer(); toast(entree ? 'Entrée enregistrée' : 'Sortie enregistrée', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }
     });
@@ -136,7 +142,7 @@ const VueStock = {
   // Création ou modification d'un produit. codePrefill : code lu par le scanner.
   formulaire(p, codePrefill) {
     const nouveau = !p;
-    p = p || { nom: '', categorie: '', codeBarres: codePrefill || '', devise: 'USD', prixAchat: '', prixVente: '', stock: 0, seuil: 5 };
+    p = p || { nom: '', categorie: '', codeBarres: codePrefill || '', devise: 'USD', prixAchat: '', prixVente: '', stock: 0, seuil: 5, actif: true };
     const f = ouvrirFenetre(nouveau ? 'Nouveau produit' : 'Modifier le produit',
       '<label class="champ"><span>Nom du produit *</span><input id="fNom" autocomplete="off" value="' + esc(p.nom) + '"></label>' +
       '<label class="champ"><span>Catégorie</span><input id="fCat" autocomplete="off" list="listeCats" value="' + esc(p.categorie) + '" placeholder="Ex : Boissons">' +
@@ -191,21 +197,32 @@ const VueStock = {
       const objet = Object.assign({}, p, {
         nom, categorie: $('#fCat', f.el).value.trim(), codeBarres: code, devise: $('#fDev', f.el).value,
         prixAchat: achat, prixVente: vente, seuil, stock: arrondi(stockDepart, 3),
-        prixGros: gros, seuilGros: gros !== null ? seuilGros : null, cartonQte, prixCarton
+        prixGros: gros, seuilGros: gros !== null ? seuilGros : null, cartonQte, prixCarton, actif: p.actif !== false
       });
       try {
-        const id = await DB.ecrire('produits', objet);
-        if (nouveau) Audit.log('produit_cree', { nom, prixVente: vente + ' ' + objet.devise, stock: stockDepart });
-        else {
-          const diff = {};
-          [['nom', 'nom'], ['prixVente', 'prix de vente'], ['prixAchat', 'prix d\'achat'], ['prixGros', 'prix de gros'], ['prixCarton', 'prix du carton'], ['seuil', 'seuil'], ['devise', 'devise']]
-            .forEach(([k, lib]) => { if ((p[k] == null ? null : p[k]) !== (objet[k] == null ? null : objet[k])) diff[lib] = [p[k] == null ? '-' : p[k], objet[k] == null ? '-' : objet[k]]; });
-          if (Object.keys(diff).length) Audit.log('produit_modifie', Object.assign({ produit: nom }, diff));
-        }
+        const id = nouveau ? await DB.ajouter('produits', objet) : await DB.ecrire('produits', objet);
         if (nouveau && stockDepart > 0) {
           await DB.ajouter('mouvements', { produitId: id, nom, date: Date.now(), type: 'entree', qte: arrondi(stockDepart, 3), note: 'Stock de départ', vendeur: App.nomVendeur() });
         }
-        f.fermer(); toast('Produit enregistré', 'ok'); App.rafraichir();
+        if (nouveau) {
+          await SyncManager.mettreEnFile('product_create', {
+            p_local_id: id, p_nom: nom, p_categorie: objet.categorie || null, p_code_barres: code || null,
+            p_devise: objet.devise, p_prix_achat: achat, p_prix_vente: vente, p_stock_initial: arrondi(stockDepart, 3),
+            p_stock_min: seuil, p_prix_gros: gros, p_seuil_gros: seuilGros, p_carton_qte: cartonQte, p_prix_carton: prixCarton, p_metadata: {}
+          });
+          Audit.log('produit_cree', { nom, prixVente: vente + ' ' + objet.devise, stock: stockDepart });
+        } else {
+          const diff = {};
+          [['nom', 'nom'], ['prixVente', 'prix de vente'], ['prixAchat', "prix d'achat"], ['prixGros', 'prix de gros'], ['prixCarton', 'prix du carton'], ['seuil', 'seuil'], ['devise', 'devise']]
+            .forEach(([k, lib]) => { if ((p[k] == null ? null : p[k]) !== (objet[k] == null ? null : objet[k])) diff[lib] = [p[k] == null ? '-' : p[k], objet[k] == null ? '-' : objet[k]]; });
+          if (Object.keys(diff).length) Audit.log('produit_modifie', Object.assign({ produit: nom }, diff));
+          await SyncManager.mettreEnFile('product_update', {
+            p_product_id: null, p_local_id: id, p_nom: nom, p_categorie: objet.categorie || null, p_code_barres: code || null,
+            p_devise: objet.devise, p_prix_achat: achat, p_prix_vente: vente, p_stock_min: seuil,
+            p_prix_gros: gros, p_seuil_gros: seuilGros, p_carton_qte: cartonQte, p_prix_carton: prixCarton, p_metadata: {}
+          });
+        }
+        f.fermer(); toast(nouveau ? 'Produit enregistré et mis en file de synchronisation' : 'Produit modifié et mis en file de synchronisation', 'ok'); App.rafraichir();
       } catch (e) { toast('Erreur : ' + e.message, 'erreur'); }
     });
   },
@@ -231,7 +248,14 @@ const VueStock = {
       if (!changements.length) { f.fermer(); toast('Aucune différence : le stock est exact'); return; }
       if (!(await confirmer('Confirmer', changements.length + ' produit(s) seront corrigés. Continuer ?', 'Appliquer'))) return;
       try {
-        for (const c of changements) await DB.ajusterStock(c.p.id, c.delta, 'inventaire', 'Inventaire', App.nomVendeur());
+        for (const c of changements) {
+          const expectedStock = c.p.stock;
+          await DB.ajusterStock(c.p.id, c.delta, 'inventaire', 'Inventaire', App.nomVendeur());
+          await SyncManager.mettreEnFile('stock_set', {
+            p_product_id: null, p_local_id: c.p.id, p_counted_stock: arrondi(expectedStock + c.delta, 3),
+            p_expected_stock: arrondi(expectedStock, 3), p_note: 'Inventaire'
+          });
+        }
         Audit.log('inventaire', { corrections: changements.length, details: changements.slice(0, 20).map((c) => c.p.nom + ' ' + (c.delta > 0 ? '+' : '') + formatQuantite(c.delta)).join(', ') });
         f.fermer(); toast(changements.length + ' produit(s) corrigé(s)', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }

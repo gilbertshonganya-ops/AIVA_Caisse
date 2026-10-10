@@ -14,11 +14,12 @@
 */
 const DB = (() => {
   const NOM = 'aiva-caisse'; // nom technique de la base : ne pas changer (sinon les données existantes ne seraient plus retrouvées)
-  const VERSION = 2;
+  const VERSION = 3;
   const TABLES = ['produits', 'ventes', 'clients', 'dettes', 'mouvements', 'params',
                   'fournisseurs', 'achats', 'dettesFournisseurs', 'depenses', 'audit'];
   // Tables ajoutées en version 2 : une ancienne sauvegarde (v1) ne doit pas les vider
   const TABLES_V2 = ['fournisseurs', 'achats', 'dettesFournisseurs', 'depenses', 'audit'];
+  const TABLES_V3 = ['sync_queue'];
   let base = null;
 
   function ouvrir() {
@@ -41,6 +42,13 @@ const DB = (() => {
           d.createObjectStore('dettesFournisseurs', { keyPath: 'id', autoIncrement: true }).createIndex('fournisseurId', 'fournisseurId');
           d.createObjectStore('depenses', { keyPath: 'id', autoIncrement: true }).createIndex('date', 'date');
           d.createObjectStore('audit', { keyPath: 'id', autoIncrement: true });
+        }
+        if (e.oldVersion < 3) {
+          const q = d.createObjectStore('sync_queue', { keyPath: 'id', autoIncrement: true });
+          q.createIndex('status', 'status');
+          q.createIndex('nextAttemptAt', 'nextAttemptAt');
+          q.createIndex('businessId', 'businessId');
+          q.createIndex('idempotencyKey', 'idempotencyKey', { unique: true });
         }
       };
       rq.onsuccess = () => { base = rq.result; resolve(base); };
@@ -66,6 +74,97 @@ const DB = (() => {
     return r ? r.valeur : defaut;
   }
   const ecrireParam = (cle, valeur) => ecrire('params', { cle, valeur });
+
+  // File locale de synchronisation. Une opération métier et sa mise en file
+  // doivent être écrites dans la même transaction IndexedDB. Ainsi, une coupure
+  // réseau après la vente ne peut pas faire perdre l'opération à synchroniser.
+  function mettreEnFileSync(operation) {
+    const now = Date.now();
+    const ligne = Object.assign({
+      type: '',
+      businessId: null,
+      idempotencyKey: null,
+      payload: {},
+      status: 'pending',
+      attempts: 0,
+      nextAttemptAt: now,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now
+    }, operation || {});
+    if (!ligne.type || !ligne.businessId || !ligne.idempotencyKey) {
+      throw new Error('Opération de synchronisation invalide.');
+    }
+    return ajouter('sync_queue', ligne);
+  }
+
+  async function syncQueueListe(options = {}) {
+    const rows = await tout('sync_queue');
+    const now = options.now || Date.now();
+    return rows
+      .filter((r) => r.status !== 'synced')
+      .filter((r) => options.businessId ? r.businessId === options.businessId : true)
+      .filter((r) => options.readyOnly ? r.nextAttemptAt <= now && r.status !== 'sending' : true)
+      .sort((a,b) => a.createdAt - b.createdAt);
+  }
+
+  async function marquerSync(id, patch) {
+    const row = await lire('sync_queue', id);
+    if (!row) throw new Error('Opération de synchronisation introuvable.');
+    return ecrire('sync_queue', Object.assign({}, row, patch || {}, { updatedAt: Date.now() }));
+  }
+
+  function enregistrerVenteEtMettreEnFile(vente, operation) {
+    return transaction(['produits', 'ventes', 'mouvements', 'dettes', 'sync_queue'], (t, ctx, echec) => {
+      if (!vente?.lignes?.length) { echec('Le panier est vide'); return; }
+      if (!operation?.businessId || !operation?.idempotencyKey) { echec('Synchronisation indisponible : contexte boutique manquant'); return; }
+      const sp = t.objectStore('produits');
+      const besoins = besoinsParProduit(vente.lignes);
+      let restants = besoins.size;
+      if (restants === 0) { echec('Le panier est vide'); return; }
+      besoins.forEach((unites, produitId) => {
+        const rq = sp.get(produitId);
+        rq.onsuccess = () => {
+          const p = rq.result;
+          if (!p) { echec('Produit introuvable (supprimé ?)'); return; }
+          if (p.stock < unites) { echec('Stock insuffisant pour « ' + p.nom + ' » (reste ' + formatQuantite(p.stock) + ')'); return; }
+          p.stock = arrondi(p.stock - unites, 3);
+          sp.put(p);
+          t.objectStore('mouvements').add({
+            produitId: p.id, nom: p.nom, date: vente.date, type: 'vente', qte: -unites, note: 'Vente', vendeur: vente.vendeur
+          });
+          restants -= 1;
+          if (restants === 0) {
+            const rv = t.objectStore('ventes').add(vente);
+            rv.onsuccess = () => {
+              vente.id = rv.result;
+              ctx.resultat = vente;
+              if (vente.resteUSD > 0.0001 && vente.clientId) {
+                t.objectStore('dettes').add({
+                  clientId: vente.clientId, date: vente.date, type: 'dette',
+                  montantUSD: vente.resteUSD, note: 'Vente n° ' + vente.id, venteId: vente.id
+                });
+              }
+              const now = Date.now();
+              const syncPayload = Object.assign({}, operation.payload || {}, { p_local_id: vente.id });
+              t.objectStore('sync_queue').add({
+                type: 'sale',
+                businessId: operation.businessId,
+                idempotencyKey: operation.idempotencyKey,
+                payload: syncPayload,
+                status: 'pending',
+                attempts: 0,
+                nextAttemptAt: now,
+                lastError: null,
+                createdAt: now,
+                updatedAt: now
+              });
+            };
+          }
+        };
+      });
+    });
+  }
 
   // Transaction "tout ou rien" : résout au "complete", rejette à l'"abort"
   function transaction(tables, travail) {
@@ -293,6 +392,7 @@ const DB = (() => {
   }
 
   return { ouvrir, tout, lire, ecrire, ajouter, supprimer, lireParam, ecrireParam, transaction,
+           mettreEnFileSync, syncQueueListe, marquerSync, enregistrerVenteEtMettreEnFile,
            enregistrerVente, annulerVente, ajusterStock, enregistrerAchat, importerProduits,
            exporterTout, importerTout, toutEffacer };
 })();

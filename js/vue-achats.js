@@ -13,7 +13,8 @@ const VueAchats = {
   },
 
   async afficher(conteneur) {
-    const [fournisseurs, achats, dettesF] = await Promise.all([DB.tout('fournisseurs'), DB.tout('achats'), DB.tout('dettesFournisseurs')]);
+    const [fournisseursTous, achats, dettesF] = await Promise.all([DB.tout('fournisseurs'), DB.tout('achats'), DB.tout('dettesFournisseurs')]);
+    const fournisseurs = fournisseursTous.filter((f) => f.actif !== false);
     this.fournisseurs = fournisseurs; this.dettesF = dettesF;
     const totalDu = fournisseurs.reduce((s, f) => s + Math.max(0, this.soldeF(f.id)), 0);
 
@@ -59,8 +60,17 @@ const VueAchats = {
     $('#fOk', f.el).addEventListener('click', async () => {
       const nom = $('#fNom', f.el).value.trim();
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
-      await DB.ecrire('fournisseurs', Object.assign({}, f0 || {}, { nom, tel: $('#fTel', f.el).value.trim() }));
-      f.fermer(); toast('Fournisseur enregistré', 'ok'); this.afficher($('#vue'));
+      const tel = $('#fTel', f.el).value.trim();
+      const localId = f0?.id ?? -(Date.now() + Math.floor(Math.random() * 1000));
+      const fournisseur = Object.assign({}, f0 || {}, { id: localId, nom, tel, actif: true });
+      await DB.ecrire('fournisseurs', fournisseur);
+      try {
+        await SyncManager.mettreEnFile('supplier_upsert', {
+          p_local_id: localId, p_supplier_id: f0 ? f0.cloudId || null : null,
+          p_nom: nom, p_tel: tel, p_email: f0?.email || null, p_adresse: f0?.adresse || null
+        });
+      } catch (_) {}
+      f.fermer(); toast('Fournisseur enregistré' + (navigator.onLine ? '' : ' — synchronisation en attente'), 'ok'); this.afficher($('#vue'));
     });
   },
 
@@ -82,7 +92,7 @@ const VueAchats = {
   // Chaque ligne est soit un produit déjà en boutique, soit un NOUVEAU produit (créé en stock dès l'achat,
   // son prix de vente sera fixé plus tard dans Stock).
   async formulaireAchat() {
-    const produits = (await DB.tout('produits')).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+    const produits = (await DB.tout('produits')).filter((p) => p.actif !== false).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     const taux = App.taux();
     const nouvelleLigne = () => ({ produitId: '', nouveau: null, qte: '', prix: '' });
     const lignes = [nouvelleLigne()];
@@ -237,15 +247,46 @@ const VueAchats = {
         if (!nom) { toast('Écrivez le nom du nouveau fournisseur', 'erreur'); return; }
       }
       if (reste > 0 && !choix) { toast('Choisissez le fournisseur : il reste ' + formatUSD(reste) + ' à lui payer', 'erreur'); return; }
-      if (choix === 'new') fournisseurId = await DB.ajouter('fournisseurs', { nom: $('#aNom', el).value.trim(), tel: $('#aTel', el).value.trim() });
-      else if (choix) fournisseurId = Number(choix);
+      if (choix === 'new') {
+        fournisseurId = -(Date.now() + Math.floor(Math.random() * 1000));
+        const nomF = $('#aNom', el).value.trim();
+        const telF = $('#aTel', el).value.trim();
+        await DB.ecrire('fournisseurs', { id: fournisseurId, nom: nomF, tel: telF, actif: true });
+        try {
+          await SyncManager.mettreEnFile('supplier_upsert', {
+            p_local_id: fournisseurId, p_supplier_id: null, p_nom: nomF, p_tel: telF, p_email: null, p_adresse: null
+          });
+        } catch (_) {}
+      } else if (choix) fournisseurId = Number(choix);
+      // Chaque nouveau produit reçoit un identifiant local stable avant l'écriture locale.
+      lignesOk.forEach((l, i) => {
+        if (l.nouveauProduit && !l.produitId) {
+          const localId = -(Date.now() + i + 1);
+          l.produitId = localId;
+          l.nouveauProduit.id = localId;
+        }
+      });
       const nouveauxNoms = lignesOk.filter((l) => l.nouveauProduit).map((l) => l.nom);
+      const fournisseurLocalId = fournisseurId;
       const achat = {
         date: Date.now(), fournisseurId, lignes: lignesOk, totalUSD: t, payeUSD: arrondi(paye, 6), resteUSD: arrondi(reste, 6),
         taux, majPrix: $('#aMaj', el).checked, note: $('#aNote', el).value.trim(), vendeur: App.nomVendeur()
       };
+      // Copie dédiée à la synchronisation : le serveur recalcule le total et le taux.
+      const cloudLines = lignesOk.map((l) => ({
+        produitLocalId: l.produitId, qte: l.qte, prixSaisi: l.prixSaisi, devise: l.devise,
+        nouveauProduit: l.nouveauProduit ? Object.assign({}, l.nouveauProduit) : null
+      }));
       try {
         await DB.enregistrerAchat(achat);
+        try {
+          await SyncManager.mettreEnFile('purchase', {
+            p_local_id: achat.id, p_date: new Date(achat.date).toISOString(),
+            p_supplier_local_id: fournisseurLocalId || null, p_supplier_id: null,
+            p_payment_amount: payeSaisi, p_payment_currency: deviseP, p_maj_prix: achat.majPrix,
+            p_note: achat.note, p_lignes: cloudLines
+          });
+        } catch (_) {}
         Audit.noter('Achat', 'n°' + achat.id + ' total ' + formatUSD(t) + (reste > 0 ? ', reste dû ' + formatUSD(reste) : '') + (nouveauxNoms.length ? ', nouveaux produits : ' + nouveauxNoms.join(', ') : ''));
         nouveauxNoms.forEach((nom) => Audit.log('produit_cree', { nom, via: 'achat fournisseur', prixVente: 'à fixer' }));
         f.fermer();
@@ -275,10 +316,12 @@ const VueAchats = {
     $('#fSuppr', f.el).addEventListener('click', async () => {
       const msg = solde > 0.005 ? 'Vous lui devez encore ' + formatUSD(solde) + '. Supprimer efface aussi son historique de dettes.' : 'Supprimer ce fournisseur ?';
       if (!(await confirmer('Supprimer le fournisseur', msg, 'Supprimer', true))) return;
-      for (const m of histo) await DB.supprimer('dettesFournisseurs', m.id);
-      await DB.supprimer('fournisseurs', fo.id);
-      Audit.noter('Fournisseur supprimé', fo.nom);
-      f.fermer(); toast('Fournisseur supprimé'); this.afficher($('#vue'));
+      await DB.ecrire('fournisseurs', Object.assign({}, fo, { actif: false }));
+      try {
+        await SyncManager.mettreEnFile('supplier_deactivate', { p_supplier_id: fo.cloudId || null, p_supplier_local_id: fo.id });
+      } catch (_) {}
+      Audit.noter('Fournisseur désactivé', fo.nom);
+      f.fermer(); toast('Fournisseur désactivé'); this.afficher($('#vue'));
     });
   },
 
@@ -295,7 +338,13 @@ const VueAchats = {
       if (isNaN(v) || v <= 0) { toast('Entrez un montant supérieur à 0', 'erreur'); return; }
       const usd = arrondi(versUSD(v, devise, App.taux()), 6);
       if (usd > solde + 0.01) { toast('Le montant dépasse ce que vous devez (' + formatUSD(solde) + ')', 'erreur'); return; }
-      await DB.ajouter('dettesFournisseurs', { fournisseurId: fo.id, date: Date.now(), type: 'paiement', montantUSD: Math.min(usd, solde), devise, note: $('#pNote', f.el).value.trim() });
+      const paiementLocalId = await DB.ajouter('dettesFournisseurs', { fournisseurId: fo.id, date: Date.now(), type: 'paiement', montantUSD: Math.min(usd, solde), devise, note: $('#pNote', f.el).value.trim() });
+      try {
+        await SyncManager.mettreEnFile('supplier_payment', {
+          p_local_id: paiementLocalId, p_supplier_local_id: fo.id, p_supplier_id: fo.cloudId || null,
+          p_amount: v, p_currency: devise, p_note: $('#pNote', f.el).value.trim()
+        });
+      } catch (_) {}
       Audit.noter('Paiement fournisseur', fo.nom + ' ' + formatUSD(Math.min(usd, solde)));
       f.fermer(); toast('Paiement enregistré', 'ok'); this.afficher($('#vue'));
     });

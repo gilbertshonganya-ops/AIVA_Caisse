@@ -2,8 +2,9 @@
    Démarrage, réglages, connexion par PIN, navigation entre les écrans. */
 const App = {
   // Réglages par défaut (modifiables dans l'écran Réglages)
-  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', pinPatron: '', pinVendeur: '', pinChange: false, derniereSauvegarde: 0 },
+  reglages: { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', derniereSauvegarde: 0 },
   role: null,            // 'patron' ou 'vendeur' (null = verrouillé)
+  businessId: null,      // fourni par le profil serveur, jamais par le frontend
   onglet: null,
   derniereActivite: Date.now(),
   invitationInstall: null,
@@ -61,15 +62,17 @@ const App = {
     this.enregistrerServiceWorker();
     $('#chargement').hidden = true;
     $('#app').hidden = false;
-    this.afficherConnexion();
+    const recoveryToken = window.AuthUI?.recupererTokenDeRecuperation?.();
+    if (recoveryToken) AuthUI.afficherNouveauMotDePasse(recoveryToken);
+    else this.afficherConnexion();
   },
 
   async chargerReglages() {
     const r = this.reglages;
     for (const cle of Object.keys(r)) r[cle] = await DB.lireParam(cle, r[cle]);
-    // Première ouverture : PIN par défaut (patron 1234, vendeur 0000)
-    if (!r.pinPatron) { r.pinPatron = hacher('1234'); await DB.ecrireParam('pinPatron', r.pinPatron); }
-    if (!r.pinVendeur) { r.pinVendeur = hacher('0000'); await DB.ecrireParam('pinVendeur', r.pinVendeur); }
+    // Les anciens PIN locaux ne servent plus à authentifier un compte SaaS.
+    // Ils pourront éventuellement être conservés plus tard comme verrouillage local
+    // après authentification, mais jamais comme preuve d'identité côté serveur.
     $('#nomBoutique').textContent = r.nomBoutique || 'EvoBuskin';
   },
 
@@ -111,78 +114,53 @@ const App = {
     window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); this.invitationInstall = e; });
   },
 
-  // ---------- Connexion par PIN ----------
+  // ---------- Authentification SaaS ----------
   verrouiller() {
     this.role = null;
+    this.businessId = null;
+    SyncManager.stop();
+    SyncManager.configure(null);
     $$('.fond-fenetre').forEach((f) => f.remove());
     document.body.classList.remove('modal-ouvert');
-    this.afficherConnexion();
+    Auth.signOut().finally(() => this.afficherConnexion());
   },
 
   afficherConnexion() {
     this.role = null;
-    $('#menu').hidden = true;
-    $('#btnQuitter').hidden = true;
-    $('#infoRole').textContent = 'Verrouillé';
-    let roleChoisi = 'vendeur';
-    let saisie = '';
-    const vue = $('#vue');
-    vue.innerHTML =
-      '<div id="ecranPin">' +
-        '<img class="logo-login" src="icons/logo.png" alt="EvoBuskin" width="96" height="96">' +
-        '<h2 style="margin:0">EvoBuskin</h2><p class="petit" style="margin:0 0 4px">Qui êtes-vous ?</p>' +
-        '<div class="roles"><button data-role="vendeur" class="actif">Vendeur</button><button data-role="patron">Patron</button></div>' +
-        '<p class="petit texte-centre">Tapez votre code PIN à 4 chiffres</p>' +
-        '<div class="points" id="points"><i></i><i></i><i></i><i></i></div>' +
-        '<div class="erreur-pin" id="erreurPin"></div>' +
-        '<div class="clavier">' +
-          [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => '<button data-n="' + n + '">' + n + '</button>').join('') +
-          '<button data-n="eff" aria-label="Effacer">&#9003;</button><button data-n="0">0</button><button data-n="ok" aria-label="Valider">&#10003;</button>' +
-        '</div>' +
-      '</div>';
+    if (window.AuthUI) AuthUI.afficherConnexion();
+  },
 
-    const majPoints = () => $$('#points i').forEach((p, i) => p.classList.toggle('plein', i < saisie.length));
-    const erreur = (m) => { $('#erreurPin').textContent = m; };
+  async apresAuthentification(data) {
+    const session = data || Auth.getSession();
+    const user = session?.user;
+    if (!user) throw new Error('Session d’authentification introuvable.');
 
-    const valider = () => {
-      const maintenant = Date.now();
-      if (maintenant < this.bloquePinJusqua) {
-        erreur('Trop d\'essais. Attendez ' + Math.ceil((this.bloquePinJusqua - maintenant) / 1000) + ' secondes.');
-        saisie = ''; majPoints(); return;
+    // Le rôle doit venir de la base sécurisée, jamais d'un champ contrôlé par le client.
+    // Le profil sera créé/attribué par le backend Supabase dans l'étape suivante.
+    let profile = null;
+    try {
+      profile = await Auth.getProfile(user.id, session.access_token);
+    } catch (e) {
+      throw new Error('Impossible de charger votre profil sécurisé. Vérifiez la configuration Supabase.');
+    }
+    if (!profile || !profile.role || !['patron', 'vendeur'].includes(profile.role)) {
+      throw new Error('Votre compte est créé, mais votre rôle n’est pas encore configuré. Contactez l’administrateur.');
+    }
+    this.role = profile.role;
+    this.businessId = profile.business_id;
+    if (!this.businessId) throw new Error('Boutique sécurisée introuvable.');
+    if (profile.role === 'patron') {
+      const mfa = await Auth.requirePatronMfa();
+      if (!mfa.enrolled || !mfa.aal2) {
+        AuthUI.afficherMfaSetup(mfa, () => this.apresAuthentification(Auth.getSession()));
+        return;
       }
-      if (saisie.length < 4) { erreur('Le code a 4 chiffres'); return; }
-      const attendu = roleChoisi === 'patron' ? this.reglages.pinPatron : this.reglages.pinVendeur;
-      if (hacher(saisie) === attendu) {
-        this.essaisPin = 0;
-        this.ouvrirSession(roleChoisi);
-        Audit.log('connexion', { role: roleChoisi });
-      } else {
-        this.essaisPin += 1;
-        Audit.log('echec_connexion', { role: roleChoisi, essai: this.essaisPin });
-        saisie = ''; majPoints();
-        if (this.essaisPin >= 5) {
-          this.bloquePinJusqua = maintenant + 30000; this.essaisPin = 0;
-          erreur('Trop d\'essais. Patientez 30 secondes.');
-        } else {
-          erreur('Code incorrect');
-        }
-      }
-    };
-
-    $$('.roles button', vue).forEach((b) => b.addEventListener('click', () => {
-      roleChoisi = b.dataset.role;
-      $$('.roles button', vue).forEach((x) => x.classList.toggle('actif', x === b));
-      saisie = ''; majPoints(); erreur('');
-    }));
-    $$('.clavier button', vue).forEach((b) => b.addEventListener('click', () => {
-      const n = b.dataset.n;
-      erreur('');
-      if (n === 'eff') saisie = saisie.slice(0, -1);
-      else if (n === 'ok') { valider(); return; }
-      else if (saisie.length < 4) saisie += n;
-      majPoints();
-      if (saisie.length === 4 && n !== 'eff') valider();
-    }));
+    }
+    SyncManager.configure(this.businessId);
+    SyncManager.start();
+    this.reglages.nomBoutique = profile.business_name || this.reglages.nomBoutique;
+    $('#nomBoutique').textContent = this.reglages.nomBoutique || 'EvoBuskin';
+    this.ouvrirSession(profile.role);
   },
 
   ouvrirSession(role) {
@@ -220,10 +198,7 @@ const App = {
   async bandeaux() {
     if (!this.estPatron()) return '';
     let html = '';
-    if (!this.reglages.pinChange) {
-      html += '<div class="bandeau rouge">Votre code PIN est celui par défaut (1234). Changez-le dans <b>Réglages</b> pour protéger vos chiffres.</div>';
-    }
-    const produits = await DB.tout('produits');
+    const produits = (await DB.tout('produits')).filter((p) => p.actif !== false);
     const sansPrix = produits.filter(prixAFixer).length;
     if (sansPrix > 0) {
       html += '<div class="bandeau">' + sansPrix + ' produit(s) attendent leur prix de vente. Allez dans <b>Stock</b> puis « Prix à fixer ».</div>';

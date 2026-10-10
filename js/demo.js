@@ -147,14 +147,12 @@ const Demo = (() => {
     produits.forEach((p) => { p.stock = arrondi(p.stock, 3); });
     // (le stock affiché est donc le stock FINAL : les ventes de démo ne le diminuent pas une 2e fois)
 
-    // Réglages : on garde ceux déjà existants (PIN, taux...) s'il y en a
+    // Réglages : on garde ceux déjà existants s'il y en a
     const params = parametres && parametres.length ? parametres : [
       { cle: 'taux', valeur: taux },
       { cle: 'nomBoutique', valeur: 'Ma Boutique' },
       { cle: 'telBoutique', valeur: '' },
       { cle: 'affichage', valeur: 'USD' },
-      { cle: 'pinPatron', valeur: hacher('1234') },
-      { cle: 'pinVendeur', valeur: hacher('0000') }
     ];
 
     return {
