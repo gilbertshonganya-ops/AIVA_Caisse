@@ -6,7 +6,7 @@ const Auth = (() => {
   function configure(){const c=CONFIG();return Boolean(c.supabaseUrl&&c.supabaseAnonKey)}
   function base(){return CONFIG().supabaseUrl.replace(/\/$/,'')}
   function headers(token){const c=CONFIG();const h={apikey:c.supabaseAnonKey,'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return h}
-  async function request(path,options={}){if(!configure())throw new Error('Supabase n\'est pas encore configuré.');const r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'});let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||'Une erreur est survenue.');e.code=d?.code||d?.error||r.status;e.status=r.status;throw e}return d}
+  async function request(path,options={}){if(!configure())throw new Error('Supabase n\'est pas encore configuré.');const r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'});let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||('Erreur '+r.status+' '+path));e.code=d?.code||d?.error||r.status;e.status=r.status;throw e}return d}
   function saveSession(s){if(!s){clearSession();return}const x={...s};delete x.password;localStorage.setItem(STORAGE_KEY,JSON.stringify(x));scheduleRefresh(x)}
   function getSession(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')}catch(_){return null}}
   function clearSession(){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=null;localStorage.removeItem(STORAGE_KEY)}
