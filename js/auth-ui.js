@@ -1,6 +1,7 @@
 /* EvoBuskin - écrans inscription / connexion / récupération du mot de passe. */
 const AuthUI = (() => {
   let mode = 'login';
+  let inviteOuverte = false;
   let accountType = 'patron';
   let busy = false;
 
@@ -91,6 +92,7 @@ const AuthUI = (() => {
     if (/EMAIL_NOT_CONFIRMED|email not confirmed/i.test(msg)) return 'Votre adresse email doit être confirmée avant la connexion.';
     if (/AAL2_REQUIRED/i.test(msg)) return 'Une authentification à deux facteurs est requise pour ce compte.';
     if (/user already registered/i.test(msg)) return 'Un compte existe déjà avec cette adresse email.';
+    if (/database error saving new user|unexpected_failure/i.test(msg)) return accountType === 'vendeur' ? 'Code d’invitation invalide, expiré ou déjà utilisé, ou limite d’utilisateurs atteinte. Demandez un nouveau code au propriétaire.' : 'Impossible de créer le compte pour le moment. Réessayez plus tard.';
     if (/rate limit/i.test(msg)) return 'Trop de demandes. Patientez quelques instants avant de réessayer.';
     return msg;
   }
@@ -105,6 +107,7 @@ const AuthUI = (() => {
   function submitButton(text) { return `<button class="btn auth-submit" id="authSubmit" type="submit">${esc(text)}</button>`; }
 
   function afficherConnexion() {
+    if (!inviteOuverte && new URLSearchParams(window.location.search).get('invite')) { inviteOuverte = true; return afficherInscription(); }
     mode = 'login';
     shell(`
       <h1>Connexion</h1>
@@ -162,6 +165,8 @@ const AuthUI = (() => {
       $('#codeInvitation').required = accountType === 'vendeur';
     }));
     $('#signupForm').addEventListener('submit', inscription);
+    const invitation = new URLSearchParams(window.location.search).get('invite');
+    if (invitation) { const bv = $('[data-type="vendeur"]'); if (bv) bv.click(); $('#codeInvitation').value = invitation.slice(0, 40); }
     $('#goLogin').addEventListener('click', afficherConnexion);
   }
 
@@ -236,7 +241,7 @@ const AuthUI = (() => {
     mode='mfa';
     if(!status.enrolled){
       shell(`<h1>Protection renforcée</h1><p class="auth-subtitle">Votre compte propriétaire nécessite une authentification à deux facteurs.</p><div id="authMessage" class="auth-message" role="alert"></div><button class="btn auth-submit" id="startMfa">Activer la double authentification</button><div class="auth-security-box">Utilisez une application TOTP. La clé secrète ne doit jamais être partagée.</div>`);
-      $('#startMfa').addEventListener('click',async()=>{try{$('#startMfa').disabled=true;const f=await Auth.enrollTotp();const qr=f?.totp?.qr_code||'';const secret=f?.totp?.secret||'';shell(`<h1>Configurer la 2FA</h1><p class="auth-subtitle">Scannez le QR code, puis saisissez le code à 6 chiffres.</p><div id="authMessage" class="auth-message" role="alert"></div>${qr?`<img class="mfa-qr" src="${esc(qr)}" alt="QR code TOTP">`:''}<div class="auth-security-box"><b>Clé TOTP de secours</b><br><code class="mfa-secret">${esc(secret)}</code></div><form id="mfaForm"><label class="champ-auth"><span>Code à 6 chiffres</span><input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required></label>${submitButton('Vérifier et activer')}</form>`);$('#mfaForm').addEventListener('submit',async e=>{e.preventDefault();try{const fs=await Auth.listFactors();const latest=(fs?.all||[]).filter(x=>x.factor_type==='totp').sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)))[0];if(!latest)throw new Error('MFA_FACTOR_NOT_FOUND');const ch=await Auth.challengeFactor(latest.id);await Auth.verifyFactor(latest.id,ch.id,$('#mfaCode').value);notice('Double authentification activée.','succes');setTimeout(onDone,400)}catch(err){notice('Code invalide ou activation impossible.','erreur')}})}catch(err){notice(errorText(err),'erreur');$('#startMfa').disabled=false}})
+      $('#startMfa').addEventListener('click',async()=>{try{$('#startMfa').disabled=true;const f=await Auth.enrollTotp();const q0=f?.totp?.qr_code||'';const qr=q0.startsWith('data:image/svg+xml')?'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(q0.slice(q0.indexOf(',')+1)):q0;const secret=f?.totp?.secret||'';shell(`<h1>Configurer la 2FA</h1><p class="auth-subtitle">Scannez le QR code, puis saisissez le code à 6 chiffres.</p><div id="authMessage" class="auth-message" role="alert"></div>${qr?`<img class="mfa-qr" src="${esc(qr)}" alt="QR code TOTP">`:''}<div class="auth-security-box"><b>Clé TOTP de secours</b><br><code class="mfa-secret">${esc(secret)}</code></div><form id="mfaForm"><label class="champ-auth"><span>Code à 6 chiffres</span><input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required></label>${submitButton('Vérifier et activer')}</form>`);$('#mfaForm').addEventListener('submit',async e=>{e.preventDefault();try{const fs=await Auth.listFactors();const latest=(fs?.all||[]).filter(x=>x.factor_type==='totp').sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)))[0];if(!latest)throw new Error('MFA_FACTOR_NOT_FOUND');const ch=await Auth.challengeFactor(latest.id);await Auth.verifyFactor(latest.id,ch.id,$('#mfaCode').value);notice('Double authentification activée.','succes');setTimeout(onDone,400)}catch(err){notice('Code invalide ou activation impossible.','erreur')}})}catch(err){notice(errorText(err),'erreur');$('#startMfa').disabled=false}})
     }else{
       shell(`<h1>Vérification 2FA</h1><p class="auth-subtitle">Entrez le code de votre application d’authentification.</p><div id="authMessage" class="auth-message" role="alert"></div><form id="mfaForm"><label class="champ-auth"><span>Code à 6 chiffres</span><input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus></label>${submitButton('Vérifier')}</form><button class="auth-link" id="mfaLogout">Annuler et se déconnecter</button>`);
       $('#mfaForm').addEventListener('submit',async e=>{e.preventDefault();try{$('#authSubmit').disabled=true;const ch=status.challenge||await Auth.challengeFactor(status.factor.id);await Auth.verifyFactor(status.factor.id,ch.id,$('#mfaCode').value);notice('Vérification réussie.','succes');setTimeout(onDone,300)}catch(err){notice('Code invalide. Réessayez.','erreur');$('#authSubmit').disabled=false}});$('#mfaLogout').addEventListener('click',()=>App.verrouiller())

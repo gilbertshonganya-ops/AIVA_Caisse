@@ -6,6 +6,7 @@ const VuePlus = {
       ['achats', '\u{1F69A}', 'Achats et fournisseurs', 'Entrées de stock, dettes envers les fournisseurs'],
       ['import', '\u{1F4E5}', 'Importer des produits', 'Depuis un fichier Excel ou CSV'],
       ['audit', '\u{1F50E}', 'Journal d\'audit', 'Qui a fait quoi, et quand'],
+      ['equipe', '\u{1F465}', 'Équipe', 'Inviter des vendeurs, gérer les accès'],
       ['reglages', '\u2699\uFE0F', 'Réglages', 'Boutique, taux, PIN, sauvegarde']
     ];
     conteneur.innerHTML =

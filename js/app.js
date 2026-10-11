@@ -23,7 +23,8 @@ const App = {
     { id: 'achats',   titre: 'Achats',    roles: ['patron'], parent: 'plus', vue: () => VueAchats },
     { id: 'import',   titre: 'Import',    roles: ['patron'], parent: 'plus', vue: () => VueImport },
     { id: 'audit',    titre: 'Journal',   roles: ['patron'], parent: 'plus', vue: () => VueAudit },
-    { id: 'reglages', titre: 'Réglages',  roles: ['patron'], parent: 'plus', vue: () => VueReglages }
+    { id: 'reglages', titre: 'Réglages',  roles: ['patron'], parent: 'plus', vue: () => VueReglages },
+    { id: 'equipe',   titre: 'Équipe',    roles: ['patron'], parent: 'plus', vue: () => VueEquipe }
   ],
 
   // Bouton « Retour » placé en haut des écrans rangés dans Plus
@@ -119,6 +120,7 @@ const App = {
     this.role = null;
     this.businessId = null;
     SyncManager.stop();
+    CatalogueSync.arreter();
     SyncManager.configure(null);
     $$('.fond-fenetre').forEach((f) => f.remove());
     document.body.classList.remove('modal-ouvert');
@@ -150,7 +152,7 @@ const App = {
     this.businessId = profile.business_id;
     if (!this.businessId) throw new Error('Boutique sécurisée introuvable.');
     if (profile.role === 'patron') {
-      const mfa = { enrolled: true, aal2: true };
+      const mfa = (window.AUTH_CONFIG && window.AUTH_CONFIG.requireMfa === true) ? await Auth.requirePatronMfa() : { enrolled: true, aal2: true };
       if (!mfa.enrolled || !mfa.aal2) {
         AuthUI.afficherMfaSetup(mfa, () => this.apresAuthentification(Auth.getSession()));
         return;
@@ -158,6 +160,7 @@ const App = {
     }
     SyncManager.configure(this.businessId);
     SyncManager.start();
+    if (profile.role === 'vendeur') CatalogueSync.demarrer(this.businessId);
     this.reglages.nomBoutique = profile.business_name || this.reglages.nomBoutique;
     $('#nomBoutique').textContent = this.reglages.nomBoutique || 'EvoBuskin';
     this.ouvrirSession(profile.role);

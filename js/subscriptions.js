@@ -13,8 +13,8 @@ const Subscriptions = (() => {
     if(!businessId||!planId) throw new Error('Business et plan requis.');
     const key = idempotencyKey || crypto.randomUUID();
     if(!window.AUTH_CONFIG?.supabaseUrl || !window.AUTH_CONFIG?.supabaseAnonKey) throw new Error('Supabase non configuré.');
-    const session = await window.Auth.ensureFreshSession();
-const accessToken = session?.access_token;
+    const session = await window.Auth?.ensureFreshSession?.();
+    const accessToken = session?.access_token;
     if(!accessToken) throw new Error('Session expirée.');
     const res = await fetch(`${window.AUTH_CONFIG.supabaseUrl}/functions/v1/cinetpay-checkout`,{
       method:'POST',
