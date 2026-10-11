@@ -2,7 +2,7 @@
    Met en cache tous les fichiers de l'application pour qu'elle marche SANS Internet.
    IMPORTANT : quand vous modifiez un fichier, changez le numéro de VERSION ci-dessous
    pour que les téléphones téléchargent la nouvelle version. */
-const VERSION = 'evobuskin-v1.3.0';
+const VERSION = 'evobuskin-v1.3.1';
 const FICHIERS = [
   './js/auth-config.js', './js/auth.js', './js/auth-ui.js', './js/cloud-db.js',
 './js/sync.js', './js/security-monitor.js', './js/subscriptions.js',
