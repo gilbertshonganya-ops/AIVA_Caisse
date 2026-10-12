@@ -52,6 +52,8 @@ const VueEquipe = {
       '<p class="petit">Le vendeur crée son compte avec un code à usage unique. Il pourra vendre, encaisser et consulter le stock, sans accès à vos finances, achats, dépenses ni réglages.</p>' +
       '<label class="champ"><span>Nom du vendeur (facultatif, pour vous repérer)</span><input id="eqNom" maxlength="60" autocomplete="off" placeholder="Ex. Marie"></label>' +
       '<label class="champ"><span>Durée de validité du code</span><select id="eqDuree"><option value="24">24 heures</option><option value="72" selected>3 jours</option><option value="168">7 jours</option></select></label>' +
+      '<label class="champ"><span>Nombre de codes à générer</span><select id="eqNombre"><option value="1">1 code</option><option value="2">2 codes</option><option value="5">5 codes</option><option value="10">10 codes</option><option value="20">20 codes</option></select></label>' +
+      '<p class="petit">La limite de votre abonnement reste appliquée par le serveur : générer plusieurs codes ne contourne pas le nombre de vendeurs autorisés.</p>' +
       '<button class="btn" id="eqCreer"' + (enLigne ? '' : ' disabled') + '>Générer une invitation</button>' +
       '<div id="eqResultat"></div></div>' +
       '<div class="carte"><h3 style="margin-top:0">Invitations</h3><div id="eqInvitations" class="petit">Chargement…</div></div>' +
@@ -67,32 +69,51 @@ const VueEquipe = {
   async creer() {
     const btn = $('#eqCreer', this.conteneur);
     btn.disabled = true;
+    const count = Math.min(20, Math.max(1, Number($('#eqNombre', this.conteneur).value) || 1));
+    const label = $('#eqNom', this.conteneur).value.trim();
+    const duree = Number($('#eqDuree', this.conteneur).value);
+    const created = [];
+    let error = null;
     try {
-      const r = await Equipe.creerInvitation($('#eqNom', this.conteneur).value.trim(), Number($('#eqDuree', this.conteneur).value));
-      this.dernierCode = r;
-      this.montrerCode(r);
-      toast('Invitation créée', 'ok');
-      this.chargerInvitations();
-    } catch (e) { toast(Equipe.messageErreur(e), 'erreur'); }
-    finally { btn.disabled = false; }
+      for (let i = 0; i < count; i++) {
+        try {
+          const nom = label ? (count === 1 ? label : label + ' ' + (i + 1)) : null;
+          created.push(await Equipe.creerInvitation(nom, duree));
+        } catch (e) { error = e; break; }
+      }
+      if (created.length) {
+        this.dernierCode = created;
+        this.montrerCodes(created);
+        toast(created.length + ' invitation(s) créée(s)', 'ok');
+        this.chargerInvitations();
+      }
+      if (error) toast(Equipe.messageErreur(error) + (created.length ? ' ' + created.length + ' code(s) ont tout de même été créés.' : ''), 'erreur');
+    } finally { btn.disabled = false; }
   },
 
-  montrerCode(r) {
-    const lien = Equipe.lienInscription(r.code);
-    const exp = new Date(r.expires_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
-    const msg = 'Bonjour' + (r.label ? ' ' + r.label : '') + ', rejoins ma boutique sur EvoBuskin.\nOuvre ce lien, choisis « Vendeur » et crée ton compte :\n' + lien + '\nCode d\'invitation : ' + r.code + '\n(valable jusqu\'au ' + exp + ', usage unique)';
+  montrerCode(r) { this.montrerCodes(Array.isArray(r) ? r : [r]); },
+
+  montrerCodes(rows) {
     const el = $('#eqResultat', this.conteneur);
-    el.innerHTML =
-      '<div class="carte alerte" style="margin-top:12px"><div class="petit">Code à transmettre (affiché une seule fois) :</div>' +
-      '<div style="font-size:1.4rem;font-weight:800;letter-spacing:1px;margin:6px 0;word-break:break-all">' + esc(r.code) + '</div>' +
-      '<div class="petit">Valable jusqu\'au ' + esc(exp) + ' · usage unique</div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
-      '<button class="btn contour" id="eqCopCode">Copier le code</button>' +
-      '<button class="btn contour" id="eqCopLien">Copier le lien</button>' +
-      '<a class="btn" id="eqWa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '" style="text-decoration:none;text-align:center">Envoyer par WhatsApp</a>' +
-      '</div></div>';
-    $('#eqCopCode', el).addEventListener('click', () => Equipe.copier(r.code));
-    $('#eqCopLien', el).addEventListener('click', () => Equipe.copier(lien));
+    const entries = rows.map((r, i) => {
+      const lien = Equipe.lienInscription(r.code);
+      const exp = new Date(r.expires_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+      const msg = 'Bonjour' + (r.label ? ' ' + r.label : '') + ', rejoins ma boutique sur EvoBuskin.\nOuvre ce lien, choisis « Vendeur » et crée ton compte :\n' + lien + '\nCode d\'invitation : ' + r.code + '\n(valable jusqu\'au ' + exp + ', usage unique)';
+      return '<div class="carte" style="margin-top:10px"><div class="petit">Invitation ' + (i + 1) + ' — code à transmettre</div>' +
+        '<div style="font-size:1.25rem;font-weight:800;letter-spacing:1px;margin:6px 0;word-break:break-all">' + esc(r.code) + '</div>' +
+        '<div class="petit">Valable jusqu’au ' + esc(exp) + ' · usage unique</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+        '<button class="btn contour" data-copy-code="' + i + '">Copier le code</button>' +
+        '<button class="btn contour" data-copy-link="' + i + '">Copier le lien</button>' +
+        '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '" style="text-decoration:none;text-align:center">WhatsApp</a>' +
+        '</div></div>';
+    }).join('');
+    const all = rows.map((r) => r.code + ' — ' + Equipe.lienInscription(r.code)).join('\n');
+    el.innerHTML = '<div class="carte alerte" style="margin-top:12px"><b>' + rows.length + ' code(s) généré(s)</b><p class="petit">Copiez les codes ou liens et transmettez chaque invitation au vendeur concerné. Les codes sont à usage unique.</p>' +
+      '<button class="btn contour" id="eqCopTout">Copier tous les codes et liens</button></div>' + entries;
+    $('#eqCopTout', el).addEventListener('click', () => Equipe.copier(all));
+    $$('[data-copy-code]', el).forEach((b) => b.addEventListener('click', () => Equipe.copier(rows[Number(b.dataset.copyCode)].code)));
+    $$('[data-copy-link]', el).forEach((b) => b.addEventListener('click', () => Equipe.copier(Equipe.lienInscription(rows[Number(b.dataset.copyLink)].code))));
   },
 
   async chargerInvitations() {
@@ -152,14 +173,41 @@ const VueEquipe = {
         const d = v.devise || 'USD';
         agr[k].tot[d] = (agr[k].tot[d] || 0) + Number(v.total || 0);
       });
-      const cles = Object.keys(agr).filter((k) => !equipe.find((m) => m.user_id === k && m.is_owner));
-      if (!cles.length) { el.textContent = 'Aucune vente de vos vendeurs sur cette période.'; return; }
-      el.innerHTML = '<div class="liste">' + cles.map((k) =>
-        '<div class="ligne"><div class="nom">' + esc(noms[k] || 'Vendeur') + '</div><div style="text-align:right"><b>' + agr[k].n + ' vente(s)</b><div class="petit">' +
-        Object.keys(agr[k].tot).map((d) => agr[k].tot[d].toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' ' + esc(d)).join(' · ') + '</div></div></div>').join('') + '</div>' +
-        '<p class="petit">Ces ventes sont lues depuis le serveur. Elles seront ajoutées à vos rapports locaux dans une prochaine version.</p>';
+      const cles = equipe.filter((m) => !m.is_owner).map((m) => m.user_id);
+      if (!cles.length) { el.textContent = 'Aucun vendeur dans votre équipe. Générez une invitation pour en ajouter un.'; return; }
+      el.innerHTML = '<div class="liste">' + cles.map((k) => {
+        const a = agr[k] || { n: 0, tot: {} };
+        const totaux = Object.keys(a.tot).map((d) => a.tot[d].toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' ' + esc(d)).join(' · ') || '0';
+        return '<div class="ligne"><div><div class="nom">' + esc(noms[k] || 'Vendeur') + '</div><div class="petit">' + a.n + ' vente(s) sur 7 jours</div></div><div style="text-align:right"><b>' + totaux + '</b>' +
+          '<div><button class="btn contour" data-vendeur="' + esc(k) + '" data-nom="' + esc(noms[k] || 'Vendeur') + '" style="margin-top:6px;padding:4px 10px">Voir toutes ses ventes</button></div></div></div>';
+      }).join('') + '</div><div id="eqDetailVendeur"></div>';
+      $$('[data-vendeur]', el).forEach((b) => b.addEventListener('click', () => this.voirVentesVendeur(b.dataset.vendeur, b.dataset.nom)));
     } catch (e) { el.textContent = 'Activité indisponible : ' + Equipe.messageErreur(e); }
+  },
+
+  async voirVentesVendeur(userId, nom) {
+    const el = $('#eqDetailVendeur', this.conteneur);
+    if (!el) return;
+    el.innerHTML = '<div class="carte">Chargement des ventes de ' + esc(nom) + '…</div>';
+    try {
+      const ventes = await CloudDB.list('sales', App.businessId, 'vendeur_user_id=eq.' + encodeURIComponent(userId) + '&order=date.desc&limit=5000');
+      const valides = ventes.filter((v) => !v.annulee);
+      const totaux = {};
+      valides.forEach((v) => { const d = v.devise || 'USD'; totaux[d] = (totaux[d] || 0) + Number(v.total || 0); });
+      const totalHtml = Object.keys(totaux).map((d) => totaux[d].toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' ' + esc(d)).join(' · ') || '0 USD';
+      el.innerHTML = '<div class="carte" style="margin-top:12px"><h3>Historique complet — ' + esc(nom) + '</h3>' +
+        '<div class="stats"><div class="stat"><div class="lib">Ventes valides</div><div class="val">' + valides.length + '</div></div>' +
+        '<div class="stat"><div class="lib">Chiffre d’affaires</div><div class="val">' + totalHtml + '</div></div></div>' +
+        (ventes.length ? '<div class="liste">' + ventes.map((v) => {
+          const lignes = Array.isArray(v.lignes) ? v.lignes : [];
+          const detail = lignes.map((l) => (l.qte || 0) + ' × ' + (l.nom || 'Produit')).join(', ');
+          return '<div class="ligne"><div style="min-width:0"><div class="nom">Vente n° ' + esc(v.id) + (v.annulee ? ' <span class="badge gris">Annulée</span>' : '') + '</div>' +
+            '<div class="sous">' + esc(new Date(v.date).toLocaleString('fr-FR')) + '</div><div class="sous">' + esc(detail) + '</div></div>' +
+            '<div class="droite gras">' + Number(v.total || 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' ' + esc(v.devise || 'USD') + '</div></div>';
+        }).join('') + '</div>' : '<p class="petit">Aucune vente trouvée pour ce vendeur.</p>') + '</div>';
+    } catch (e) { el.innerHTML = '<div class="carte alerte">Impossible de charger les ventes : ' + esc(Equipe.messageErreur(e)) + '</div>'; }
   }
+
 };
 
 /* ---------- Vendeur : catalogue de la boutique du patron ---------- */

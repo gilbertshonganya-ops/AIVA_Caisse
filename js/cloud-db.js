@@ -92,7 +92,7 @@ const CloudDB = (() => {
   }
 
   async function annulerVenteAtomique(businessId, saleId, idempotencyKey) {
-    return rpc('cancel_sale_atomic', {
+    return rpc('v18_cancel_sale_idempotent', {
       p_business_id: businessId,
       p_sale_id: saleId,
       p_idempotency_key: idempotencyKey || undefined

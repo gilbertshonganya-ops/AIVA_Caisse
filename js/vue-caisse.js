@@ -118,7 +118,7 @@ const VueCaisse = {
     if (nouvelle > p.stock) { toast('Stock insuffisant : il reste ' + formatQuantite(p.stock) + ' « ' + p.nom + ' »', 'erreur'); return false; }
     if (!ligne) {
       ligne = {
-        produitId: p.id, nom: p.nom, qte: 0, stock: p.stock,
+        produitId: p.id, cloudId: p.cloudId || null, nom: p.nom, qte: 0, stock: p.stock,
         prixUSD: versUSD(p.prixVente, p.devise, App.taux()),
         coutUSD: versUSD(p.prixAchat || 0, p.devise, App.taux()),
         // Tarifs de gros et de carton (facultatifs, définis dans la fiche produit)
@@ -326,6 +326,7 @@ const VueCaisse = {
         const reference = $('#reference', el).value.trim();
         const lignesLocal = this.panier.map((l) => ({
           produitId: l.produitId,
+          cloudId: l.cloudId || null,
           nom: l.nom,
           qte: l.qte,
           facteur: l.facteur || 1,
@@ -359,6 +360,7 @@ const VueCaisse = {
           p_paye: c.paye,
           p_devise: 'USD',
           p_lignes: lignesLocal.map((l) => ({
+            produitId: l.cloudId || null,
             produitLocalId: l.produitId,
             qte: l.qte,
             facteur: l.facteur || 1
@@ -375,6 +377,12 @@ const VueCaisse = {
           idempotencyKey,
           payload: cloudPayload
         });
+        // Lancer l'envoi tout de suite après la transaction locale, sans attendre le timer.
+        await SyncManager.syncNow();
+        const resteSync = (await DB.syncQueueListe({ businessId: App.businessId })).find((op) => op.idempotencyKey === idempotencyKey);
+        if (resteSync && resteSync.status !== 'synced') {
+          toast('Vente enregistrée sur ce téléphone; envoi serveur en attente. ' + (resteSync.lastError || 'La synchronisation sera réessayée automatiquement.'), 'erreur');
+        }
         Audit.log('vente', { id: enregistree.id, total: arrondi(total, 2) + ' USD', mode: etat.mode, reste: arrondi(c.reste, 2) + ' USD' });
         this.panier = [];
         f.fermer();

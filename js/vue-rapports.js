@@ -7,6 +7,13 @@ const VueRapports = {
 
   // Calcule tous les chiffres de la période (utilisé par l'écran ET par le PDF)
   async collecter() {
+    // Les rapports sont recalculés à partir du snapshot cloud, pas seulement du navigateur.
+    if (window.CloudSnapshotSync) {
+      const cloud = await CloudSnapshotSync.tirer({ force: true });
+      if (navigator.onLine && CloudDB.ready() && !cloud.ok) {
+        throw new Error('Impossible de confirmer les données serveur. Vérifiez la migration V18 et réessayez : les rapports locaux ne doivent pas être pris pour des rapports complets.');
+      }
+    }
     const [ventesTout, dettes, produits, clients, depensesTout, achatsTout, dettesF, fournisseurs] = await Promise.all([
       DB.tout('ventes'), DB.tout('dettes'), DB.tout('produits'), DB.tout('clients'),
       DB.tout('depenses'), DB.tout('achats'), DB.tout('dettesFournisseurs'), DB.tout('fournisseurs')]);
@@ -250,6 +257,7 @@ const VueRapports = {
       if (!(await confirmer('Annuler la vente', 'Le stock sera remis et la dette éventuelle supprimée. Continuer ?', 'Annuler la vente', true))) return;
       try {
         await DB.annulerVente(v.id);
+        try { await SyncManager.mettreEnFile('sale_cancel', { p_sale_local_id: v.id, p_sale_id: v.cloudId || null, p_sale_idempotency_key: v.idempotencyKey || null }); } catch (syncError) { console.warn('Annulation locale en attente de synchronisation serveur.', syncError); }
         Audit.log('vente_annulee', { id: v.id, total: arrondi(v.totalUSD, 2) + ' USD', mode: v.mode });
         f.fermer(); toast('Vente annulée', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }

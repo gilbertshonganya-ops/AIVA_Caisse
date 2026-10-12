@@ -81,6 +81,12 @@ const App = {
     this.reglages[cle] = valeur;
     await DB.ecrireParam(cle, valeur);
     if (cle === 'nomBoutique') $('#nomBoutique').textContent = valeur || 'EvoBuskin';
+    // Les réglages partagés suivent le compte, pas le navigateur. Les changements
+    // restent en file locale hors connexion puis sont envoyés par SyncManager.
+    if (this.role === 'patron' && this.businessId && ['nomBoutique', 'telBoutique', 'affichage'].includes(cle)) {
+      try { await SyncManager.mettreEnFile('settings_update', { p_settings: { [cle]: valeur } }); }
+      catch (e) { console.warn('Réglage local conservé; synchronisation serveur en attente.', e); }
+    }
   },
 
   enregistrerServiceWorker() {
@@ -103,6 +109,20 @@ const App = {
     $('#btnQuitter').addEventListener('click', () => this.verrouiller());
     // Bouton « Retour » des écrans du menu Plus (un seul écouteur pour tous les écrans)
     $('#vue').addEventListener('click', (e) => { if (e.target.closest('[data-retour]')) this.aller('plus'); });
+    $('#vue').addEventListener('click', async (e) => {
+      const bouton = e.target.closest('#btnRetrySync');
+      if (!bouton) return;
+      bouton.disabled = true;
+      try {
+        await SyncManager.retryBlocked();
+        await SyncManager.syncNow();
+        const cloud = await CloudSnapshotSync.tirer({ force: true });
+        const enAttente = await DB.syncQueueListe({ businessId: this.businessId });
+        if (!enAttente.length && cloud.ok) toast('Toutes les opérations sont synchronisées.', 'ok');
+        else toast(enAttente.length + ' opération(s) restent à synchroniser. Consultez le message d’erreur et vérifiez la connexion.', 'erreur');
+      } catch (err) { toast('Synchronisation impossible : ' + (err.message || err), 'erreur'); }
+      finally { if (bouton.isConnected) bouton.disabled = false; await this.rafraichir(); }
+    });
     ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { this.derniereActivite = Date.now(); }, { passive: true }));
     setInterval(() => {
       if (this.role && Date.now() - this.derniereActivite > this.DELAI_VERROU_MS) {
@@ -121,6 +141,7 @@ const App = {
     this.businessId = null;
     SyncManager.stop();
     CatalogueSync.arreter();
+    CloudSnapshotSync.arreter();
     SyncManager.configure(null);
     $$('.fond-fenetre').forEach((f) => f.remove());
     document.body.classList.remove('modal-ouvert');
@@ -159,10 +180,24 @@ const App = {
       }
     }
     SyncManager.configure(this.businessId);
+    // Réessayer d'abord les opérations locales en attente, puis télécharger l'état serveur.
+    await SyncManager.syncNow();
     SyncManager.start();
-    if (profile.role === 'vendeur') CatalogueSync.demarrer(this.businessId);
     this.reglages.nomBoutique = profile.business_name || this.reglages.nomBoutique;
     $('#nomBoutique').textContent = this.reglages.nomBoutique || 'EvoBuskin';
+    // Télécharger le jeu de données partagé AVANT d'ouvrir les écrans :
+    // ventes, dettes, achats, dépenses et rapports viennent du serveur sur chaque appareil.
+    const cloudPull = await CloudSnapshotSync.demarrer(this.businessId);
+    if (cloudPull?.raison === 'appareil-autre-boutique') {
+      const message = 'Cet appareil contient déjà les données d’une autre boutique. Pour éviter de mélanger deux commerces, utilisez un autre téléphone ou un profil de navigateur séparé.';
+      this.role = null; this.businessId = null;
+      await Auth.signOut();
+      throw new Error(message);
+    }
+    if (!cloudPull?.ok && cloudPull?.raison !== 'hors-ligne') {
+      toast('Données serveur non téléchargées. Vérifiez la connexion et exécutez la migration V18 avant de gérer les ventes.', 'erreur');
+    }
+    if (profile.role === 'vendeur') CatalogueSync.demarrer(this.businessId);
     this.ouvrirSession(profile.role);
   },
 
@@ -199,8 +234,20 @@ const App = {
 
   // ---------- Messages d'avertissement pour le patron ----------
   async bandeaux() {
-    if (!this.estPatron()) return '';
     let html = '';
+    if (this.businessId) {
+      const file = await DB.syncQueueListe({ businessId: this.businessId });
+      const bloquees = file.filter((x) => x.status === 'blocked' || x.status === 'failed');
+      const enAttente = file.filter((x) => x.status === 'pending' || x.status === 'sending');
+      if (file.length) {
+        const dernierMessage = file.slice().reverse().find((x) => x.lastError)?.lastError;
+        html += '<div class="bandeau ' + (bloquees.length ? 'rouge' : '') + '"><b>Synchronisation serveur</b> : ' +
+          enAttente.length + ' en attente, ' + bloquees.length + ' en échec/bloquée.' +
+          (dernierMessage ? '<div class="petit">Dernière erreur : ' + esc(dernierMessage) + '</div>' : '') +
+          '<button class="btn contour" id="btnRetrySync" style="margin-top:8px">Réessayer la synchronisation</button></div>';
+      }
+    }
+    if (!this.estPatron()) return html;
     const produits = (await DB.tout('produits')).filter((p) => p.actif !== false);
     const sansPrix = produits.filter(prixAFixer).length;
     if (sansPrix > 0) {
@@ -209,8 +256,8 @@ const App = {
     const ageJours = (Date.now() - (this.reglages.derniereSauvegarde || 0)) / 86400000;
     if (produits.length > 0 && ageJours > 7) {
       html += '<div class="bandeau">' + (this.reglages.derniereSauvegarde
-        ? 'Dernière sauvegarde il y a ' + Math.floor(ageJours) + ' jours.'
-        : 'Aucune sauvegarde faite pour l\'instant.') + ' Faites une sauvegarde dans <b>Réglages</b> (si le téléphone est perdu, les données le sont aussi).</div>';
+        ? 'Dernière sauvegarde locale il y a ' + Math.floor(ageJours) + ' jours.'
+        : 'Aucune sauvegarde locale faite pour l’instant.') + ' Les opérations synchronisées sont conservées sur le serveur; gardez aussi une copie de sauvegarde indépendante dans <b>Réglages</b>.</div>';
     }
     return html;
   }

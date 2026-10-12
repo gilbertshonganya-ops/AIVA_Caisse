@@ -31,7 +31,7 @@ const VueReglages = {
 
       '<div class="carte"><h3>Application</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn gris" id="rInstall">Installer sur l\'écran d\'accueil</button>' +
-        '<p class="petit texte-centre">EvoBuskin version 1.2.0 &middot; fonctionne hors connexion</p></div></div>';
+        '<p class="petit texte-centre">EvoBuskin V18 &middot; synchronisation cloud multi-appareils</p></div></div>';
 
     $('#rAff').value = r.affichage;
 

@@ -99,8 +99,14 @@ const DB = (() => {
   }
 
   async function syncQueueListe(options = {}) {
-    const rows = await tout('sync_queue');
+    let rows = await tout('sync_queue');
     const now = options.now || Date.now();
+    // Une fermeture forcée du navigateur peut laisser une opération en état "sending".
+    // Après 2 minutes sans activité, la remettre en attente : la clé d'idempotence
+    // empêche de créer deux ventes si le serveur avait déjà reçu la première tentative.
+    const stale = rows.filter((r) => r.status === 'sending' && now - (r.updatedAt || r.createdAt || 0) > 120000);
+    for (const row of stale) await marquerSync(row.id, { status: 'pending', nextAttemptAt: now, lastError: 'Reprise automatique après interruption de synchronisation.' });
+    if (stale.length) rows = await tout('sync_queue');
     return rows
       .filter((r) => r.status !== 'synced')
       .filter((r) => options.businessId ? r.businessId === options.businessId : true)

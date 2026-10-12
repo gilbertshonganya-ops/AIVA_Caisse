@@ -51,7 +51,48 @@ const SyncManager = (() => {
       });
       let result;
       switch (operation.type) {
-        case 'sale': result = await CloudDB.enregistrerVenteAtomique(payload); break;
+        case 'sale_cancel': {
+          let serverSaleId = payload.p_sale_id || null;
+          if (!serverSaleId && payload.p_sale_idempotency_key) {
+            const found = await CloudDB.list('sales', operation.businessId, 'idempotency_key=eq.' + encodeURIComponent(payload.p_sale_idempotency_key) + '&limit=1');
+            if (found.length) serverSaleId = found[0].id;
+          }
+          if (!serverSaleId && payload.p_sale_local_id != null) {
+            const found = await CloudDB.list('sales', operation.businessId, 'local_id=eq.' + encodeURIComponent(payload.p_sale_local_id) + '&limit=1');
+            if (found.length) serverSaleId = found[0].id;
+          }
+          if (!serverSaleId) throw new Error('SALE_NOT_SYNCED');
+          result = await CloudDB.annulerVenteAtomique(operation.businessId, serverSaleId, operation.idempotencyKey);
+          const localSale = payload.p_sale_local_id != null ? await DB.lire('ventes', Number(payload.p_sale_local_id)) : null;
+          if (localSale && result?.id) await DB.ecrire('ventes', Object.assign({}, localSale, { cloudId: result.id, annulee: true }));
+          break;
+        }
+        case 'sale': {
+          // Une vente à crédit peut contenir un nouveau client créé directement depuis la caisse.
+          // Synchroniser la fiche client avant la vente permet au serveur de créer la dette liée.
+          if (!payload.p_client_id && payload.p_client_local_id != null) {
+            const localCustomer = await DB.lire('clients', Number(payload.p_client_local_id));
+            if (!localCustomer) throw new Error('CUSTOMER_NOT_FOUND');
+            let cloudCustomerId = localCustomer.cloudId || null;
+            if (!cloudCustomerId) {
+              const customer = await CloudDB.enregistrerClientSecurise({
+                p_business_id: operation.businessId,
+                p_idempotency_key: SyncManager.uuid(),
+                p_local_id: localCustomer.id,
+                p_nom: localCustomer.nom,
+                p_tel: localCustomer.tel || null,
+                p_email: localCustomer.email || null,
+                p_adresse: localCustomer.adresse || null
+              });
+              cloudCustomerId = customer?.id || null;
+              if (!cloudCustomerId) throw new Error('CUSTOMER_NOT_SYNCED');
+              await DB.ecrire('clients', Object.assign({}, localCustomer, { cloudId: cloudCustomerId }));
+            }
+            payload.p_client_id = cloudCustomerId;
+          }
+          result = await CloudDB.enregistrerVenteAtomique(payload);
+          break;
+        }
         case 'product_create': result = await CloudDB.creerProduitSecurise(payload); break;
         case 'product_update': result = await CloudDB.modifierProduitSecurise(payload); break;
         case 'stock_adjust': result = await CloudDB.ajusterStockSecurise(payload); break;
@@ -63,6 +104,7 @@ const SyncManager = (() => {
         case 'supplier_payment': result = await CloudDB.payerDetteFournisseurAtomique(payload); break;
         case 'expense': result = await CloudDB.enregistrerDepenseAtomique(payload); break;
         case 'exchange_rate': result = await CloudDB.modifierTauxSecurise(payload); break;
+        case 'settings_update': result = await CloudDB.rpc('v18_update_business_settings_secure', { p_business_id: operation.businessId, p_settings: payload.p_settings || {} }); break;
         case 'customer_upsert': result = await CloudDB.enregistrerClientSecurise(payload); break;
         case 'customer_deactivate': {
           let customerId = payload.p_customer_id || null;

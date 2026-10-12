@@ -5,8 +5,18 @@ const VueAudit = {
   async afficher(conteneur) {
     const liste = (await DB.tout('audit')).sort((a, b) => b.id - a.id);
     const derniere = liste.length ? liste[0].hash : '';
+    const cloudAudit = (await DB.lireParam('cloudAuditLogs', []) || []).slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     conteneur.innerHTML =
       App.htmlRetour() +
+      '<div class="carte"><h3>Journal serveur — équipe et sécurité</h3><p class="petit">Ces événements sont conservés dans Supabase et suivent votre compte sur tous les appareils.</p>' +
+      (cloudAudit.length ? '<div class="liste">' + cloudAudit.slice(0, 100).map((e) => {
+        const date = e.created_at ? new Date(e.created_at) : new Date();
+        const payload = e.payload && typeof e.payload === 'object' ? JSON.stringify(e.payload) : '';
+        const libelles = { invitation_creee: 'Code d’invitation généré', invitation_utilisee: 'Invitation utilisée / vendeur rejoint', invitation_revoquee: 'Invitation révoquée', vendeur_rejoint_equipe: 'Vendeur ajouté à l’équipe', vendeur_retrait_equipe: 'Accès vendeur retiré', patron_compte_cree: 'Compte patron créé', reglages_modifies: 'Réglages de boutique modifiés' };
+        return '<div class="ligne" style="cursor:default;align-items:flex-start"><div><div class="nom">' + esc(libelles[e.action] || e.action || 'Événement serveur') + '</div>' +
+          '<div class="sous">' + esc(date.toLocaleString('fr-FR')) + ' · ' + esc(e.actor_user_id || 'Système') + '</div>' +
+          (payload ? '<div class="sous" style="word-break:break-word">' + esc(payload) + '</div>' : '') + '</div></div>';
+      }).join('') + '</div>' : '<p class="petit">Aucun événement serveur synchronisé. Connectez-vous à Internet pour actualiser le journal.</p>') + '</div>' +
       '<div class="carte"><div class="ligne-flex"><div><div class="petit">Opérations enregistrées</div><div class="gras" style="font-size:1.2rem">' + liste.length + '</div></div>' +
       '<div class="droite"><div class="petit">Empreinte actuelle</div><div class="gras" style="font-family:monospace">' + esc(derniere ? derniere.slice(-8) : '-') + '</div></div></div>' +
       '<p class="petit" style="margin:10px 0 0">Chaque ligne est liée à la précédente. Notez l\'empreinte de temps en temps : si des lignes récentes disparaissaient, elle ne correspondrait plus.</p></div>' +
