@@ -143,16 +143,22 @@ const CloudDB = (() => {
     return rpc('upsert_customer_secure', payload);
   }
 
+  function sansClientLocal(payload) {
+    const p = Object.assign({}, payload);
+    delete p.p_customer_local_id; // champ interne de l'app, inconnu du serveur
+    return p;
+  }
+
   async function desactiverClientSecurise(payload) {
-    return rpc('deactivate_customer_secure', payload);
+    return rpc('deactivate_customer_secure', sansClientLocal(payload));
   }
 
   async function ajouterDetteClientAtomique(payload) {
-    return rpc('create_customer_debt_atomic', payload);
+    return rpc('create_customer_debt_atomic', sansClientLocal(payload));
   }
 
   async function payerDetteClientAtomique(payload) {
-    return rpc('pay_customer_debt_atomic', payload);
+    return rpc('pay_customer_debt_atomic', sansClientLocal(payload));
   }
 
   async function modifierTauxSecurise(payload) {
