@@ -76,6 +76,7 @@ const VueDettes = {
       const doublon = this.verifierClient(nom, tel, (await DB.tout('clients')).filter((c) => c.actif !== false), client ? client.id : null);
       if (doublon) { montrerErreur(doublon); return; }
       const localClient = Object.assign({}, client || {}, { nom, tel, actif: true });
+      if (localClient.id == null) localClient.id = await DB.ajouter('clients', localClient);
       await DB.ecrire('clients', localClient);
       try {
         await SyncManager.mettreEnFile('customer_upsert', {
