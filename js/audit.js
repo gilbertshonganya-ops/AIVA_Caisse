@@ -55,19 +55,19 @@ const Audit = (() => {
 
   // Libellés affichés dans l'écran Journal d'audit
   const LIBELLES = {
-    connexion: 'Connexion', echec_connexion: 'Échec de connexion (mauvais PIN)',
+    connexion: 'Connexion', echec_connexion: 'Échec de connexion',
     vente: 'Vente', vente_annulee: 'Vente annulée',
     stock_entree: 'Entrée de stock', stock_sortie: 'Sortie de stock', inventaire: 'Inventaire',
     produit_cree: 'Produit créé', produit_modifie: 'Produit modifié', produit_supprime: 'Produit supprimé',
     paiement_dette: 'Paiement de dette client', dette_ajoutee: 'Dette client ajoutée', client_supprime: 'Client supprimé',
-    taux_modifie: 'Taux de change modifié', pin_modifie: 'PIN modifié',
+    taux_modifie: 'Taux de change modifié', mot_de_passe_modifie: 'Mot de passe modifié',
     sauvegarde: 'Sauvegarde', restauration: 'Restauration d\'une sauvegarde', demo_chargee: 'Données de démonstration chargées',
     donnees_effacees: 'Toutes les données effacées',
     achat: 'Achat fournisseur', paiement_fournisseur: 'Paiement fournisseur', fournisseur_supprime: 'Fournisseur supprimé',
     depense_ajoutee: 'Dépense ajoutée', depense_supprimee: 'Dépense supprimée', import_produits: 'Import de produits'
   };
   // Pour Audit.noter('Achat', 'texte') : le titre en français est converti en code d'action
-  const NOTES = { 'Achat': 'achat', 'Fournisseur supprimé': 'fournisseur_supprime', 'Paiement fournisseur': 'paiement_fournisseur',
+  const NOTES = { 'Achat': 'achat', 'Fournisseur supprimé': 'fournisseur_supprime', 'Fournisseur désactivé': 'fournisseur_supprime', 'Paiement fournisseur': 'paiement_fournisseur',
                   'Dépense ajoutée': 'depense_ajoutee', 'Dépense supprimée': 'depense_supprimee', 'Import CSV': 'import_produits' };
 
   const contenu = (e) => JSON.stringify([e.prev, e.date, e.acteur, e.action, e.detail]);
@@ -77,6 +77,7 @@ const Audit = (() => {
   function log(action, detail) {
     let acteur = 'Écran de connexion';
     if (typeof App !== 'undefined' && App.role) acteur = App.nomVendeur();
+    envoyerAuServeur(action, detail, acteur);
     return DB.transaction(['audit', 'params'], (t) => {
       const sa = t.objectStore('audit'), sp = t.objectStore('params');
       const c = sa.openCursor(null, 'prev'); // dernière ligne connue
@@ -90,6 +91,21 @@ const Audit = (() => {
         ra.onsuccess = () => sp.put({ cle: 'auditTete', valeur: { id: ra.result, hash: entree.hash } });
       };
     }).catch((e) => console.error('Journal d\'audit : échec d\'écriture', e));
+  }
+
+  // Événements que le serveur ne voit pas par lui-même : ils sont envoyés (file d'attente, même hors ligne)
+  // pour apparaître dans le journal du patron, avec la boutique et le vendeur.
+  // Tout ce qui est noté ici est aussi envoyé (file d'attente, même hors ligne) au journal du patron,
+  // avec la boutique, le vendeur et le détail de ce qui a changé (avant → après).
+  const NE_PAS_ENVOYER = new Set(['demo_chargee', 'donnees_effacees']);
+  function envoyerAuServeur(action, detail, acteur) {
+    try {
+      if (NE_PAS_ENVOYER.has(action) || typeof App === 'undefined' || !App.businessId || typeof SyncManager === 'undefined') return;
+      let payload = Object.assign({}, detail || {}, { par: acteur, d: 1 });
+      if (JSON.stringify(payload).length > 3400 && Array.isArray(payload.articles)) payload.articles = payload.articles.slice(0, 5);
+      if (JSON.stringify(payload).length > 3800) payload = { par: acteur, d: 1, texte: JSON.stringify(detail || {}).slice(0, 600) };
+      SyncManager.mettreEnFile('audit_event', { p_action: String(action).toLowerCase().replace(/[^a-z0-9_]/g, '_'), p_payload: payload }).catch(() => {});
+    } catch (_) { /* le journal local reste la référence */ }
   }
 
   // Version "texte libre" : noter('Achat', 'n°12 total 40 $')

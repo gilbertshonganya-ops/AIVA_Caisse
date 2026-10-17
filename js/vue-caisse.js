@@ -245,7 +245,7 @@ const VueCaisse = {
         '<option value="new">+ Nouveau client</option></select></label>' +
         '<div id="nouveauClient" hidden><div class="deux-colonnes">' +
           '<label class="champ"><span>Nom</span><input id="ncNom" autocomplete="off"></label>' +
-          '<label class="champ"><span>Téléphone</span><input id="ncTel" inputmode="tel" autocomplete="off" placeholder="08..."></label>' +
+          '<label class="champ"><span>Téléphone</span><input id="ncTel" inputmode="tel" maxlength="17" autocomplete="off" placeholder="0895006995"></label>' +
         '</div><div class="bandeau rouge" id="ncErreur" hidden></div></div>' +
       '</div>' +
       '<button class="btn" id="validerVente">Valider la vente</button>');
@@ -310,10 +310,11 @@ const VueCaisse = {
           if (!nom) { toast('Écrivez le nom du nouveau client', 'erreur'); return; }
           const telSaisi = $('#ncTel', el).value.trim();
           const refus = (m) => { const e = $('#ncErreur', el); e.textContent = m; e.hidden = false; toast('Client non enregistré', 'erreur'); };
-          if (telSaisi && normaliserTel(telSaisi).length < 11) { refus('Numéro de téléphone trop court.'); return; }
-          const doublon = VueDettes.verifierClient(nom, telSaisi, clients, null); // même nom ou même numéro : refusé
+          const vt = validerTelRDC(telSaisi);
+          if (!vt.ok) { refus(MESSAGE_TEL_RDC); return; }
+          const doublon = VueDettes.verifierClient(nom, vt.local, clients, null); // même nom ou même numéro : refusé
           if (doublon) { refus(doublon + ' Choisissez-le dans la liste ou changez le nom ou le numéro.'); return; }
-          client = { nom, tel: telSaisi };
+          client = { nom, tel: vt.local };
         } else {
           clientId = Number(choix);
           client = clients.find((x) => x.id === clientId);
@@ -381,9 +382,14 @@ const VueCaisse = {
         await SyncManager.syncNow();
         const resteSync = (await DB.syncQueueListe({ businessId: App.businessId })).find((op) => op.idempotencyKey === idempotencyKey);
         if (resteSync && resteSync.status !== 'synced') {
-          toast('Vente enregistrée sur ce téléphone; envoi serveur en attente. ' + (resteSync.lastError || 'La synchronisation sera réessayée automatiquement.'), 'erreur');
+          toast('Vente enregistrée sur ce téléphone ; elle sera envoyée automatiquement dès que possible. ' + (Reseau.estErreurReseau(resteSync.lastError) ? Reseau.MESSAGE : ''), 'erreur');
         }
-        Audit.log('vente', { id: enregistree.id, total: arrondi(total, 2) + ' USD', mode: etat.mode, reste: arrondi(c.reste, 2) + ' USD' });
+        const clientNom = clientId ? ((clients.find((x) => x.id === clientId) || client || {}).nom || '') : '';
+        Audit.log('vente', {
+          id: enregistree.id, client: clientNom, total: arrondi(total, 2), paye: arrondi(c.paye, 2), reste: arrondi(c.reste, 2),
+          mode: etat.mode, devise: etat.devise, reference: reference || '',
+          articles: lignesLocal.slice(0, 12).map((l) => ({ nom: l.nom, qte: l.qte, total: arrondi(l.prixUnitaireUSD * l.qte, 2) }))
+        });
         this.panier = [];
         f.fermer();
         this.produits = (await DB.tout('produits')).filter((p) => p.actif !== false);

@@ -64,15 +64,16 @@ const VueDettes = {
   formulaireClient(client) {
     const f = ouvrirFenetre(client ? 'Modifier le client' : 'Nouveau client',
       '<label class="champ"><span>Nom *</span><input id="cNom" autocomplete="off" value="' + esc(client ? client.nom : '') + '"></label>' +
-      '<label class="champ"><span>Téléphone WhatsApp</span><input id="cTel" inputmode="tel" autocomplete="off" placeholder="Ex : 0895006995" value="' + esc(client ? client.tel : '') + '"></label>' +
+      '<label class="champ"><span>Téléphone WhatsApp</span><input id="cTel" inputmode="tel" maxlength="17" autocomplete="off" placeholder="Ex : 0895006995" value="' + esc(client ? client.tel : '') + '"></label>' +
       '<div class="bandeau rouge" id="cErreur" hidden></div>' +
       '<button class="btn" id="cOk">Enregistrer</button>');
     const montrerErreur = (m) => { const e = $('#cErreur', f.el); e.textContent = m; e.hidden = false; toast('Client non enregistré', 'erreur'); };
     $('#cOk', f.el).addEventListener('click', async () => {
       const nom = $('#cNom', f.el).value.trim();
-      const tel = $('#cTel', f.el).value.trim();
+      const vt = validerTelRDC($('#cTel', f.el).value);
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
-      if (tel && normaliserTel(tel).length < 11) { montrerErreur('Numéro de téléphone trop court.'); return; }
+      if (!vt.ok) { montrerErreur(MESSAGE_TEL_RDC); return; }
+      const tel = vt.local;
       const doublon = this.verifierClient(nom, tel, (await DB.tout('clients')).filter((c) => c.actif !== false), client ? client.id : null);
       if (doublon) { montrerErreur(doublon); return; }
       const localClient = Object.assign({}, client || {}, { nom, tel, actif: true });
@@ -88,6 +89,11 @@ const VueDettes = {
           p_adresse: localClient.adresse || null
         });
       } catch (_) { /* mode local : la synchronisation sera réessayée après reconnexion */ }
+      if (!client) Audit.log('client_cree', { nom, tel: tel || '-' });
+      else {
+        const d = {}; if (client.nom !== nom) d['nom'] = [client.nom, nom]; if ((client.tel || '') !== (tel || '')) d['téléphone'] = [client.tel || '-', tel || '-'];
+        if (Object.keys(d).length) Audit.log('client_modifie', Object.assign({ client: client.nom }, d));
+      }
       f.fermer(); toast('Client enregistré', 'ok'); App.rafraichir();
     });
   },
@@ -106,7 +112,7 @@ const VueDettes = {
         (solde > 0.005 ? '<button class="btn contour" id="dRappel">Envoyer un rappel WhatsApp</button>' : '') +
         (App.estPatron() ? '<button class="btn gris" id="dDette">Ajouter une dette (ancien cahier)</button>' : '') +
         '<div class="ligne-boutons"><button class="btn gris" id="dModif">Modifier</button>' +
-        (App.estPatron() ? '<button class="btn rouge" id="dSuppr">Supprimer</button>' : '') + '</div>' +
+        (App.estPatron() ? '<button class="btn rouge" id="dSuppr"' + (solde > 0.005 ? ' style="opacity:.55"' : '') + '>Supprimer</button>' : '') + '</div>' +
       '</div>' +
       '<h3 style="margin:16px 0 6px">Historique</h3>' +
       (histo.length ? '<div class="liste">' + histo.map((m) =>
@@ -128,8 +134,13 @@ const VueDettes = {
     $('#dModif', f.el).addEventListener('click', () => { f.fermer(); this.formulaireClient(client); });
     const suppr = $('#dSuppr', f.el);
     if (suppr) suppr.addEventListener('click', async () => {
-      const msg = solde > 0.005 ? client.nom + ' doit encore ' + formatUSD(solde) + '. Supprimer quand même efface aussi son historique.' : 'Supprimer ce client et son historique ?';
-      if (await confirmer('Désactiver le client', msg + ' Le client sera désactivé, sans supprimer son historique.', 'Désactiver', true)) {
+      // Règle : un client qui a encore une dette ne peut jamais être supprimé
+      const soldeActuel = this.solde(idClient);
+      if (soldeActuel > 0.005) {
+        toast('Suppression impossible : ' + client.nom + ' doit encore ' + formatUSD(soldeActuel) + '. Faites d’abord régler sa dette.', 'erreur');
+        return;
+      }
+      if (await confirmer('Supprimer le client', 'Supprimer ' + client.nom + ' ? Son historique de paiements reste conservé.', 'Supprimer', true)) {
         const localClient = Object.assign({}, client, { actif: false });
         await DB.ecrire('clients', localClient);
         try {
@@ -138,8 +149,8 @@ const VueDettes = {
             p_customer_local_id: client.id
           });
         } catch (_) { /* sera synchronisé plus tard */ }
-        Audit.log('client_desactive', { nom: client.nom, soldeUSD: arrondi(solde, 2) });
-        f.fermer(); toast('Client désactivé', 'ok'); App.rafraichir();
+        Audit.log('client_desactive', { nom: client.nom, soldeUSD: 0 });
+        f.fermer(); toast('Client supprimé', 'ok'); App.rafraichir();
       }
     });
   },
@@ -188,7 +199,7 @@ const VueDettes = {
           p_note: $('#mNote', f.el).value.trim()
         });
       } catch (_) { /* mode offline : la dette sera synchronisée ultérieurement */ }
-      Audit.log('paiement_dette', { client: client.nom, montant: arrondi(montantUSD, 2) + ' USD' });
+      Audit.log('paiement_dette', { client: client.nom, montant: arrondi(montantUSD, 2), mode: $('#mMode', f.el).value, devise: etat.devise, reste: arrondi(Math.max(0, solde - montantUSD), 2) });
       f.fermer(); toast('Paiement enregistré', 'ok'); App.rafraichir();
     });
   },
@@ -216,7 +227,7 @@ const VueDettes = {
           p_note: $('#mNote', f.el).value.trim()
         });
       } catch (_) { /* mode offline : la dette sera synchronisée ultérieurement */ }
-      Audit.log('dette_ajoutee', { client: client.nom, montant: arrondi(versUSD(v, etat.devise, App.taux()), 2) + ' USD' });
+      Audit.log('dette_ajoutee', { client: client.nom, montant: arrondi(versUSD(v, etat.devise, App.taux()), 2) });
       f.fermer(); toast('Dette enregistrée', 'ok'); App.rafraichir();
     });
   }

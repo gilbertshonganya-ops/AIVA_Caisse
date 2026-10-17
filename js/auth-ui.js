@@ -39,12 +39,12 @@ const AuthUI = (() => {
     `;
   }
 
-  function shell(content) {
+  function shell(content, slogan) {
     const vue = $('#vue');
     $('#menu').hidden = true;
     $('#btnQuitter').hidden = true;
     $('#infoRole').textContent = 'Compte sécurisé';
-    vue.innerHTML = `<section class="auth-page"><div class="auth-card"><img class="auth-logo" src="icons/logo.png" alt="EvoBuskin" width="86" height="86"><div class="auth-brand">EvoBuskin</div>${content}</div><div class="auth-security">🔒 Vos identifiants sont transmis uniquement à votre serveur d'authentification. Aucun mot de passe ni clé secrète n'est stocké dans l'application.</div></section>`;
+    vue.innerHTML = `<section class="auth-page"><div class="auth-card"><img class="auth-logo" src="icons/logo.png" alt="EvoBuskin" width="86" height="86"><div class="auth-brand">EvoBuskin</div>${slogan ? `<p class="auth-slogan"><b>${slogan}</b></p>` : ''}${content}</div></section>`;
     bindCommon();
   }
 
@@ -82,12 +82,16 @@ const AuthUI = (() => {
     }
   }
 
+  const MESSAGE_MDP = 'Le mot de passe doit avoir 12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.';
   function validPassword(password) {
     return passwordRules.every(r => r.test(password));
   }
 
   function errorText(err) {
+    if (window.Reseau && Reseau.estErreurReseau(err)) return Reseau.MESSAGE;
     const msg = String(err?.message || err || 'Une erreur est survenue.');
+    if (/HORS_LIGNE_COMPTE_INCONNU/.test(msg)) return 'Pas de connexion Internet. Ce compte doit d’abord être ouvert une fois avec Internet sur cet appareil.';
+    if (/CUSTOMER_HAS_DEBT/.test(msg)) return 'Ce client a encore une dette : suppression impossible.';
     if (/invalid login credentials/i.test(msg)) return 'Adresse email ou mot de passe incorrect.';
     if (/EMAIL_NOT_CONFIRMED|email not confirmed/i.test(msg)) return 'Votre adresse email doit être confirmée avant la connexion.';
     if (/AAL2_REQUIRED/i.test(msg)) return 'Une authentification à deux facteurs est requise pour ce compte.';
@@ -121,8 +125,7 @@ const AuthUI = (() => {
       <button class="auth-link" id="forgotPassword">Mot de passe oublié ?</button>
       <div class="auth-separator"><span>Pas encore de compte ?</span></div>
       <button class="btn contour" id="goSignup">Créer un compte</button>
-      <p class="auth-footnote">La sécurité des permissions est contrôlée côté serveur. Le choix du rôle ne donne jamais, à lui seul, des privilèges administrateur.</p>
-    `);
+    `, 'Continuez à faire avancer votre commerce.');
     $('#loginForm').addEventListener('submit', connexion);
     $('#forgotPassword').addEventListener('click', afficherRecuperation);
     $('#goSignup').addEventListener('click', afficherInscription);
@@ -155,7 +158,7 @@ const AuthUI = (() => {
       </form>
       <div class="auth-separator"><span>Déjà un compte ?</span></div>
       <button class="btn contour" id="goLogin">Se connecter</button>
-    `);
+    `, 'Sachez ce que vous vendez et ce que vous gagnez.');
     $$('.account-type').forEach(b => b.addEventListener('click', () => {
       accountType = b.dataset.type;
       $$('.account-type').forEach(x => x.classList.toggle('actif', x === b));
@@ -181,24 +184,64 @@ const AuthUI = (() => {
         ${submitButton('Envoyer le lien de récupération')}
       </form>
       <button class="auth-link" id="backLogin">← Retour à la connexion</button>
-      <div class="auth-security-box">Pour éviter de révéler si une adresse existe dans notre système, le message de confirmation reste volontairement générique.</div>
     `);
     $('#recoveryForm').addEventListener('submit', recuperation);
     $('#backLogin').addEventListener('click', afficherConnexion);
+  }
+
+  let minuteurAttente = null;
+  function arreterAttente() { if (minuteurAttente) clearInterval(minuteurAttente); minuteurAttente = null; }
+  // Après 5 erreurs : pause de 60 secondes (conservée même si la page est rechargée)
+  function afficherAttente() {
+    arreterAttente();
+    const maj = () => {
+      const reste = AuthHorsLigne.attente();
+      const bouton = $('#authSubmit');
+      if (reste <= 0) { arreterAttente(); notice(''); if (bouton) bouton.disabled = false; return; }
+      if (bouton) bouton.disabled = true;
+      notice('Trop de tentatives. Patientez ' + reste + ' seconde' + (reste > 1 ? 's' : '') + ' avant de réessayer.', 'erreur');
+    };
+    maj();
+    minuteurAttente = setInterval(maj, 1000);
+  }
+
+  async function connexionHorsLigne(email, password) {
+    const r = await AuthHorsLigne.verifier(email, password);
+    if (r && r.inconnu) throw (navigator.onLine ? Reseau.erreur() : new Error('HORS_LIGNE_COMPTE_INCONNU'));
+    if (!r) throw new Error('Invalid login credentials');
+    await Chargeur.pendant(() => App.ouvrirSessionHorsLigne(r.user, r.profil), 'Ouverture de votre boutique…');
+    Audit.log('connexion', { mode: 'sans Internet' });
   }
 
   async function connexion(e) {
     e.preventDefault(); if (busy) return;
     const email = $('#email').value.trim(); const password = $('#motDePasse').value;
     if (!email || !password) return notice('Renseignez votre email et votre mot de passe.', 'erreur');
-    busy = true; $('#authSubmit').disabled = true; notice('Connexion sécurisée en cours…');
+    if (AuthHorsLigne.attente() > 0) return afficherAttente();
+    busy = true; $('#authSubmit').disabled = true; notice('');
     try {
-      const data = await Auth.signIn(email, password);
+      if (!navigator.onLine) { await connexionHorsLigne(email, password); return; }
+      let data;
+      try { data = await Auth.signIn(email, password); }
+      catch (err) {
+        if (err.reseau) { await connexionHorsLigne(email, password); return; } // coupure pendant la connexion : mode hors ligne
+        if (/invalid login credentials/i.test(String(err.message))) {
+          AuthHorsLigne.compterEchec();
+          Auth.rpcPublic('v19_log_auth_failure', { p_email: email, p_kind: 'connexion_echec' }).catch(() => {}); // visible dans le journal du patron
+        }
+        throw err;
+      }
       if (!data.access_token) throw new Error('Connexion non terminée. Vérifiez votre adresse email.');
-      if (typeof App.apresAuthentification === 'function') await App.apresAuthentification(data);
-      else App.afficherConnexion();
-    } catch (err) { notice(errorText(err), 'erreur'); }
-    finally { busy = false; if ($('#authSubmit')) $('#authSubmit').disabled = false; }
+      AuthHorsLigne.effacerEssais();
+      await Chargeur.pendant(async () => {
+        await AuthHorsLigne.memoriser(email, password, data.user);
+        if (typeof App.apresAuthentification === 'function') await App.apresAuthentification(data);
+        else App.afficherConnexion();
+      }, 'Ouverture de votre boutique…');
+      Audit.log('connexion', { mode: 'avec Internet' });
+      AuthHorsLigne.envoyerEchecsEnAttente();
+    } catch (err) { notice(errorText(err), 'erreur'); if (AuthHorsLigne.attente() > 0) afficherAttente(); }
+    finally { busy = false; if ($('#authSubmit') && AuthHorsLigne.attente() <= 0) $('#authSubmit').disabled = false; }
   }
 
   async function inscription(e) {
@@ -211,12 +254,12 @@ const AuthUI = (() => {
     if (accountType === 'patron' && !businessName) return notice('Indiquez le nom de votre boutique.', 'erreur');
     if (accountType === 'vendeur' && !inviteCode) return notice('Un code d’invitation est requis pour un vendeur.', 'erreur');
     if (!$('#conditions').checked) return notice('Vous devez accepter les conditions d’utilisation.', 'erreur');
-    busy = true; $('#authSubmit').disabled = true; notice('Création du compte sécurisée en cours…');
+    busy = true; $('#authSubmit').disabled = true; notice('');
     try {
       const data = await Auth.signUp({ email, password, fullName, accountType, businessName, inviteCode });
       if (data.access_token) {
-        notice('Compte créé. Ouverture de votre espace…', 'succes');
-        if (typeof App.apresAuthentification === 'function') await App.apresAuthentification(data);
+        await AuthHorsLigne.memoriser(email, password, data.user);
+        await Chargeur.pendant(async () => { if (typeof App.apresAuthentification === 'function') await App.apresAuthentification(data); }, 'Ouverture de votre boutique…');
       } else {
         notice('Compte créé. Consultez votre email pour confirmer votre adresse, puis connectez-vous.', 'succes');
       }
@@ -224,16 +267,46 @@ const AuthUI = (() => {
     finally { busy = false; if ($('#authSubmit')) $('#authSubmit').disabled = false; }
   }
 
+  // Mot de passe oublié : le système vérifie si le compte existe, puis envoie le lien.
+  // Après 5 essais, pause de 60 secondes (aussi contrôlée par le serveur).
+  let minuteurRecup = null;
+  function afficherAttenteRecup() {
+    if (minuteurRecup) clearInterval(minuteurRecup);
+    const maj = () => {
+      const reste = AuthHorsLigne.attente('recup');
+      const bouton = $('#authSubmit');
+      if (reste <= 0) { clearInterval(minuteurRecup); minuteurRecup = null; notice(''); if (bouton) bouton.disabled = false; return; }
+      if (bouton) bouton.disabled = true;
+      notice('Trop de tentatives. Patientez ' + reste + ' seconde' + (reste > 1 ? 's' : '') + ' avant de réessayer.', 'erreur');
+    };
+    maj(); minuteurRecup = setInterval(maj, 1000);
+  }
+
   async function recuperation(e) {
     e.preventDefault(); if (busy) return;
     const email = $('#email').value.trim();
     if (!email) return notice('Renseignez votre adresse email.', 'erreur');
-    busy = true; $('#authSubmit').disabled = true; notice('Envoi en cours…');
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return notice('Cette adresse email n’est pas valide.', 'erreur');
+    if (AuthHorsLigne.attente('recup') > 0) return afficherAttenteRecup();
+    busy = true; $('#authSubmit').disabled = true; notice('');
     try {
+      let existe;
+      try { existe = await Auth.rpcPublic('v19_account_exists', { p_email: email }); }
+      catch (err) {
+        if (/RATE_LIMITED/.test(String(err.message))) { AuthHorsLigne.forcerPause('recup'); afficherAttenteRecup(); return; }
+        throw err;
+      }
+      AuthHorsLigne.compterEchec('recup');
+      if (!existe) {
+        notice('Aucun compte n’est associé à cette adresse email. Vérifiez l’adresse ou créez un compte.', 'erreur');
+        if (AuthHorsLigne.attente('recup') > 0) afficherAttenteRecup();
+        return;
+      }
       await Auth.resetPassword(email);
-      notice('Si cette adresse correspond à un compte, un lien sécurisé de récupération vient d’être envoyé.', 'succes');
-    } catch (err) { notice('Impossible de traiter la demande pour le moment. Réessayez plus tard.', 'erreur'); }
-    finally { busy = false; if ($('#authSubmit')) $('#authSubmit').disabled = false; }
+      AuthHorsLigne.effacerEssais('recup');
+      notice('Compte trouvé. Un lien de récupération vient d’être envoyé à ' + email + '. Consultez votre boîte mail (et les courriers indésirables).', 'succes');
+    } catch (err) { notice(Reseau.estErreurReseau(err) ? Reseau.MESSAGE : 'Impossible de traiter la demande pour le moment. Réessayez plus tard.', 'erreur'); }
+    finally { busy = false; if ($('#authSubmit') && AuthHorsLigne.attente('recup') <= 0) $('#authSubmit').disabled = false; }
   }
 
 
@@ -281,6 +354,6 @@ const AuthUI = (() => {
     return hash.get('access_token');
   }
 
-  return { afficherConnexion, afficherInscription, afficherRecuperation, afficherNouveauMotDePasse, afficherMfaSetup, recupererTokenDeRecuperation, strength };
+  return { afficherConnexion, afficherInscription, afficherRecuperation, afficherNouveauMotDePasse, afficherMfaSetup, recupererTokenDeRecuperation, strength, validPassword, MESSAGE_MDP };
 })();
 window.AuthUI = AuthUI;

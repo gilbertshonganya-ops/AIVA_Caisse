@@ -23,11 +23,14 @@ const CloudDB = (() => {
       Accept: 'application/json',
       ...(options.headers || {})
     };
-    const response = await fetch(base + (options.query || ''), {
-      method: options.method || 'GET',
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body)
-    });
+    let response;
+    try {
+      response = await fetch(base + (options.query || ''), {
+        method: options.method || 'GET',
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      });
+    } catch (_) { throw Reseau.erreur(); }
     let data = null;
     try { data = await response.json(); } catch (_) {}
     if (!response.ok) {
@@ -71,16 +74,19 @@ const CloudDB = (() => {
     if (!ready()) throw new Error('Session cloud non disponible.');
     const c = CONFIG();
     const s = session();
-    const response = await fetch(c.supabaseUrl.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
-      method: 'POST',
-      headers: {
-        apikey: c.supabaseAnonKey,
-        Authorization: 'Bearer ' + s.access_token,
-        'Content-Type': 'application/json',
-        Accept: 'application/json'
-      },
-      body: JSON.stringify(args || {})
-    });
+    let response;
+    try {
+      response = await fetch(c.supabaseUrl.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
+        method: 'POST',
+        headers: {
+          apikey: c.supabaseAnonKey,
+          Authorization: 'Bearer ' + s.access_token,
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify(args || {})
+      });
+    } catch (_) { throw Reseau.erreur(); }
     let data = null;
     try { data = await response.json(); } catch (_) {}
     if (!response.ok) throw new Error(data?.message || data?.hint || data?.details || data?.error || 'Erreur RPC Supabase.');

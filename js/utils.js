@@ -109,6 +109,19 @@ function normaliserTel(tel) {
   if (chiffres.length === 9) chiffres = '243' + chiffres; // numéro sans le 0 de tête
   return chiffres;
 }
+// Numéro de la RDC : EXACTEMENT 0 suivi de 9 chiffres (10 chiffres), ou +243 suivi de 9 chiffres.
+// Retourne { ok, local: '0895006995', intl: '+243895006995' } ; { ok: true, vide: true } si le champ est vide.
+function validerTelRDC(tel) {
+  const brut = String(tel || '').trim();
+  if (!brut) return { ok: true, vide: true, local: '', intl: '' };
+  let c = brut.replace(/[\s.\-()]/g, '');
+  if (/^\+243\d{9}$/.test(c)) c = '0' + c.slice(4);
+  else if (/^00243\d{9}$/.test(c)) c = '0' + c.slice(5);
+  else if (/^243\d{9}$/.test(c)) c = '0' + c.slice(3);
+  if (!/^0\d{9}$/.test(c)) return { ok: false, local: '', intl: '' };
+  return { ok: true, local: c, intl: '+243' + c.slice(1) };
+}
+const MESSAGE_TEL_RDC = 'Numéro invalide : tapez 0 suivi de 9 chiffres (ex. 0895006995) ou +243 suivi de 9 chiffres.';
 function lienWhatsApp(tel, message) {
   const n = normaliserTel(tel);
   const base = n ? 'https://wa.me/' + n : 'https://wa.me/';

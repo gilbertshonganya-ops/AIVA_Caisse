@@ -5,7 +5,7 @@ const VueReglages = {
     conteneur.innerHTML =
       '<div class="carte"><h3>Ma boutique</h3><div style="height:8px"></div>' +
         '<label class="champ"><span>Nom de la boutique (sur les reçus)</span><input id="rNom" autocomplete="off" value="' + esc(r.nomBoutique) + '"></label>' +
-        '<label class="champ"><span>Téléphone de la boutique</span><input id="rTel" inputmode="tel" autocomplete="off" value="' + esc(r.telBoutique) + '"></label>' +
+        '<label class="champ"><span>Téléphone de la boutique</span><input id="rTel" inputmode="tel" maxlength="17" autocomplete="off" placeholder="0895006995" value="' + esc(r.telBoutique) + '"></label>' +
         '<button class="btn" id="rSaveBoutique">Enregistrer</button></div>' +
 
       '<div class="carte"><h3>Taux de change</h3><div style="height:8px"></div>' +
@@ -29,17 +29,21 @@ const VueReglages = {
         '<button class="btn contour" id="rDemo">Charger les données de démonstration</button>' +
         '<button class="btn rouge" id="rEffacer">Tout effacer</button></div></div>' +
 
+      '<div id="zoneCompte"></div>' +
       '<div class="carte"><h3>Application</h3><div style="height:8px"></div><div class="pile">' +
         '<button class="btn gris" id="rInstall">Installer sur l\'écran d\'accueil</button>' +
-        '<p class="petit texte-centre">EvoBuskin V18 &middot; synchronisation cloud multi-appareils</p></div></div>';
+        '<p class="petit texte-centre">EvoBuskin V19 &middot; vos données sur tous vos appareils</p></div></div>';
 
     $('#rAff').value = r.affichage;
+    VueCompte.afficher($('#zoneCompte'), true); // mot de passe et suppression de compte
 
     $('#rSaveBoutique').addEventListener('click', async () => {
       const nom = $('#rNom').value.trim();
       if (!nom) { toast('Le nom de la boutique est obligatoire', 'erreur'); return; }
+      const vt = validerTelRDC($('#rTel').value);
+      if (!vt.ok) { toast(MESSAGE_TEL_RDC, 'erreur'); return; }
       await App.sauverReglage('nomBoutique', nom);
-      await App.sauverReglage('telBoutique', $('#rTel').value.trim());
+      await App.sauverReglage('telBoutique', vt.local);
       toast('Boutique enregistrée', 'ok');
     });
 
@@ -134,14 +138,14 @@ const VueReglages = {
       VueCaisse.panier = [];
       await Audit.log('restauration', { produits: n, fichier: fichier.name });
       toast('Sauvegarde restaurée', 'ok');
-      App.verrouiller(); // les PIN ont peut-être changé : on redemande le code
+      App.verrouiller(); // la session est fermée par précaution
     } catch (e) {
       toast(e instanceof SyntaxError ? 'Fichier illisible' : e.message, 'erreur');
     }
   },
 
   async chargerDemo() {
-    if (!(await confirmer('Données de démonstration', 'Cela remplace vos produits, ventes et clients actuels par un exemple de boutique. Vos PIN et réglages sont gardés. Continuer ?', 'Charger la démo'))) return;
+    if (!(await confirmer('Données de démonstration', 'Cela remplace vos produits, ventes et clients actuels par un exemple de boutique. Vos réglages sont gardés. Continuer ?', 'Charger la démo'))) return;
     const params = await DB.tout('params');
     const demo = Demo.generer(App.taux(), params);
     demo.donnees.audit = await DB.tout('audit'); // le journal d'audit n'est jamais remplacé par la démo
@@ -155,7 +159,7 @@ const VueReglages = {
   async toutEffacer() {
     if (!(await confirmer('Tout effacer', 'Produits, ventes, clients et dettes seront supprimés pour toujours. Avez-vous fait une sauvegarde ?', 'Tout effacer', true))) return;
     if (!(await confirmer('Dernière question', 'Cette action est irréversible. Effacer vraiment ?', 'Oui, effacer', true))) return;
-    await DB.toutEffacer(['params', 'audit']); // on garde les réglages, les PIN et le journal d'audit
+    await DB.toutEffacer(['params', 'audit']); // on garde les réglages et le journal d'activité
     await Audit.log('donnees_effacees', {});
     VueCaisse.panier = [];
     toast('Toutes les données ont été effacées');

@@ -55,12 +55,14 @@ const VueAchats = {
   formulaireFournisseur(f0) {
     const f = ouvrirFenetre(f0 ? 'Modifier le fournisseur' : 'Nouveau fournisseur',
       '<label class="champ"><span>Nom *</span><input id="fNom" autocomplete="off" value="' + esc(f0 ? f0.nom : '') + '"></label>' +
-      '<label class="champ"><span>Téléphone</span><input id="fTel" inputmode="tel" autocomplete="off" value="' + esc(f0 ? f0.tel : '') + '"></label>' +
+      '<label class="champ"><span>Téléphone</span><input id="fTel" inputmode="tel" maxlength="17" autocomplete="off" placeholder="Ex : 0895006995" value="' + esc(f0 ? f0.tel : '') + '"></label>' +
       '<button class="btn" id="fOk">Enregistrer</button>');
     $('#fOk', f.el).addEventListener('click', async () => {
       const nom = $('#fNom', f.el).value.trim();
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
-      const tel = $('#fTel', f.el).value.trim();
+      const vt = validerTelRDC($('#fTel', f.el).value);
+      if (!vt.ok) { toast(MESSAGE_TEL_RDC, 'erreur'); return; }
+      const tel = vt.local;
       const localId = f0?.id ?? -(Date.now() + Math.floor(Math.random() * 1000));
       const fournisseur = Object.assign({}, f0 || {}, { id: localId, nom, tel, actif: true });
       await DB.ecrire('fournisseurs', fournisseur);
@@ -70,7 +72,12 @@ const VueAchats = {
           p_nom: nom, p_tel: tel, p_email: f0?.email || null, p_adresse: f0?.adresse || null
         });
       } catch (_) {}
-      f.fermer(); toast('Fournisseur enregistré' + (navigator.onLine ? '' : ' — synchronisation en attente'), 'ok'); this.afficher($('#vue'));
+      if (!f0) Audit.log('fournisseur_cree', { nom, tel: tel || '-' });
+      else {
+        const d = {}; if (f0.nom !== nom) d['nom'] = [f0.nom, nom]; if ((f0.tel || '') !== (tel || '')) d['téléphone'] = [f0.tel || '-', tel || '-'];
+        if (Object.keys(d).length) Audit.log('fournisseur_modifie', Object.assign({ fournisseur: f0.nom }, d));
+      }
+      f.fermer(); toast('Fournisseur enregistré' + (navigator.onLine ? '' : ' — envoi en attente'), 'ok'); this.afficher($('#vue'));
     });
   },
 
@@ -102,7 +109,7 @@ const VueAchats = {
       '<label class="champ"><span>Fournisseur</span><select id="aF"><option value="">-- Sans fournisseur --</option>' +
         this.fournisseurs.map((x) => '<option value="' + x.id + '">' + esc(x.nom) + '</option>').join('') + '<option value="new">+ Nouveau fournisseur</option></select></label>' +
       '<div id="aNouveau" hidden><div class="deux-colonnes"><label class="champ"><span>Nom</span><input id="aNom" autocomplete="off"></label>' +
-        '<label class="champ"><span>Téléphone</span><input id="aTel" inputmode="tel" autocomplete="off"></label></div></div>' +
+        '<label class="champ"><span>Téléphone</span><input id="aTel" inputmode="tel" maxlength="17" autocomplete="off" placeholder="0895006995"></label></div></div>' +
       '<h3 style="margin:4px 0 8px">Produits achetés</h3><div id="aLignes"></div>' +
       '<button class="btn gris" id="aAj" style="margin-bottom:12px">+ Ajouter un produit</button>' +
       '<div class="ligne-flex" style="margin-bottom:8px"><span>Total de l\'achat</span><span class="total-grand" id="aTotal">0,00 $</span></div>' +
@@ -152,9 +159,9 @@ const VueAchats = {
             '<div id="alerteNom' + i + '" class="petit rouge-txt" style="margin:-6px 0 8px"></div>' +
             '<div class="deux-colonnes"><label class="champ"><span>Catégorie</span><input data-c="' + i + '" list="listeCatsAchat" autocomplete="off" value="' + esc(l.nouveau.categorie) + '"></label>' +
             '<label class="champ"><span>Prix exprimés en</span><select data-dv="' + i + '"><option value="USD"' + (l.nouveau.devise === 'USD' ? ' selected' : '') + '>Dollars ($)</option><option value="CDF"' + (l.nouveau.devise === 'CDF' ? ' selected' : '') + '>Francs (FC)</option></select></label></div>' +
-            '<label class="champ"><span>Code-barres (facultatif, ajoutable plus tard)</span><div class="recherche" style="margin:0"><input data-cb="' + i + '" inputmode="numeric" autocomplete="off" value="' + esc(l.nouveau.code) + '"><button class="btn" data-scan="' + i + '" type="button">&#128247;</button></div></label>' +
-            '<label class="champ"><span>Prix de vente (facultatif : vous pourrez le fixer plus tard)</span><input data-pv="' + i + '" inputmode="decimal" autocomplete="off" value="' + esc(l.nouveau.prixVente) + '"></label>'
+            '<label class="champ"><span>Code-barres (facultatif, ajoutable plus tard)</span><div class="recherche" style="margin:0"><input data-cb="' + i + '" inputmode="numeric" autocomplete="off" value="' + esc(l.nouveau.code) + '"><button class="btn" data-scan="' + i + '" type="button">&#128247;</button></div></label>'
           : '';
+        const champPrixVente = l.nouveau ? '<label class="champ"><span>Prix de vente (facultatif : vous pourrez le fixer plus tard)</span><input data-pv="' + i + '" inputmode="decimal" autocomplete="off" value="' + esc(l.nouveau.prixVente) + '"></label>' : '';
         return '<div class="carte" style="padding:10px;margin-bottom:8px"><select data-p="' + i + '" style="width:100%;padding:10px;border:1.5px solid var(--couleur-bordure);border-radius:10px;margin-bottom:8px">' +
           '<option value="">-- Choisir le produit --</option>' +
           '<option value="__new__"' + (valeur === '__new__' ? ' selected' : '') + '>+ Nouveau produit (pas encore dans la boutique)</option>' +
@@ -162,6 +169,7 @@ const VueAchats = {
           champsNouveau +
           '<div class="deux-colonnes"><label class="champ" style="margin:0"><span>Quantité achetée</span><input data-q="' + i + '" inputmode="decimal" value="' + esc(l.qte) + '"></label>' +
           '<label class="champ" style="margin:0"><span>Prix d\'achat unitaire (' + (dev ? (dev === 'CDF' ? 'FC' : '$') : '...') + ')</span><input data-pr="' + i + '" inputmode="decimal" value="' + esc(l.prix) + '"></label></div>' +
+          (champPrixVente ? '<div style="height:8px"></div>' + champPrixVente : '') +
           (lignes.length > 1 ? '<button class="btn gris petit-btn" data-x="' + i + '" style="margin-top:8px">Retirer</button>' : '') + '</div>';
       }).join('') + '<datalist id="listeCatsAchat">' + Array.from(new Set(produits.map((x) => x.categorie).filter(Boolean))).map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>';
 
@@ -245,12 +253,13 @@ const VueAchats = {
       if (choix === 'new') {
         const nom = $('#aNom', el).value.trim();
         if (!nom) { toast('Écrivez le nom du nouveau fournisseur', 'erreur'); return; }
+        if (!validerTelRDC($('#aTel', el).value).ok) { toast(MESSAGE_TEL_RDC, 'erreur'); return; }
       }
       if (reste > 0 && !choix) { toast('Choisissez le fournisseur : il reste ' + formatUSD(reste) + ' à lui payer', 'erreur'); return; }
       if (choix === 'new') {
         fournisseurId = -(Date.now() + Math.floor(Math.random() * 1000));
         const nomF = $('#aNom', el).value.trim();
-        const telF = $('#aTel', el).value.trim();
+        const telF = validerTelRDC($('#aTel', el).value).local;
         await DB.ecrire('fournisseurs', { id: fournisseurId, nom: nomF, tel: telF, actif: true });
         try {
           await SyncManager.mettreEnFile('supplier_upsert', {
@@ -287,7 +296,11 @@ const VueAchats = {
             p_note: achat.note, p_lignes: cloudLines
           });
         } catch (_) {}
-        Audit.noter('Achat', 'n°' + achat.id + ' total ' + formatUSD(t) + (reste > 0 ? ', reste dû ' + formatUSD(reste) : '') + (nouveauxNoms.length ? ', nouveaux produits : ' + nouveauxNoms.join(', ') : ''));
+        const foAudit = fournisseurId ? await DB.lire('fournisseurs', fournisseurId) : null;
+        Audit.log('achat', {
+          fournisseur: (foAudit && foAudit.nom) || '', total: arrondi(t, 2), paye: arrondi(paye, 2), reste: arrondi(reste, 2),
+          articles: lignesOk.slice(0, 12).map((l) => ({ nom: l.nom || (l.nouveauProduit && l.nouveauProduit.nom) || 'Produit', qte: l.qte, prix: l.prixSaisi + ' ' + (l.devise === 'CDF' ? 'FC' : '$') }))
+        });
         nouveauxNoms.forEach((nom) => Audit.log('produit_cree', { nom, via: 'achat fournisseur', prixVente: 'à fixer' }));
         f.fermer();
         toast(nouveauxNoms.length ? 'Achat enregistré : le stock est à jour (' + nouveauxNoms.length + ' nouveau(x) produit(s), prix de vente à fixer dans Stock)' : 'Achat enregistré : le stock est à jour', 'ok');
@@ -320,24 +333,37 @@ const VueAchats = {
       try {
         await SyncManager.mettreEnFile('supplier_deactivate', { p_supplier_id: fo.cloudId || null, p_supplier_local_id: fo.id });
       } catch (_) {}
-      Audit.noter('Fournisseur désactivé', fo.nom);
+      Audit.log('fournisseur_supprime', { fournisseur: fo.nom });
       f.fermer(); toast('Fournisseur désactivé'); this.afficher($('#vue'));
     });
   },
 
   formulairePaiementF(fo, solde) {
     let devise = 'USD';
+    const taux = App.taux();
+    // Montant restant exprimé dans la devise choisie (comme à l'encaissement en caisse)
+    const resteEn = (d) => d === 'CDF' ? Math.round(solde * taux) : arrondi(solde, 2);
     const f = ouvrirFenetre('Paiement à ' + fo.nom,
-      '<p class="petit">Reste dû : <b>' + formatUSD(solde) + '</b> (' + formatCDF(solde * App.taux()) + ')</p>' +
+      '<p class="petit" id="pReste"></p>' +
       '<div class="segment" id="devises"><button data-dev="USD" class="actif">Dollars ($)</button><button data-dev="CDF">Francs (FC)</button></div>' +
-      '<label class="champ"><span>Montant</span><input id="pMontant" inputmode="decimal" autocomplete="off" value="' + arrondi(solde, 2) + '"></label>' +
+      '<label class="champ"><span id="pLibelle">Montant en dollars ($)</span><input id="pMontant" inputmode="decimal" autocomplete="off" value="' + resteEn('USD') + '"></label>' +
       '<label class="champ"><span>Note (facultatif)</span><input id="pNote" autocomplete="off"></label><button class="btn" id="pOk">Enregistrer le paiement</button>');
-    $$('#devises button', f.el).forEach((b) => b.addEventListener('click', () => { devise = b.dataset.dev; $$('#devises button', f.el).forEach((x) => x.classList.toggle('actif', x === b)); }));
+    const majAffichage = () => {
+      $('#pReste', f.el).innerHTML = 'Reste dû : <b>' + (devise === 'CDF' ? formatCDF(solde * taux) : formatUSD(solde)) + '</b> <span class="petit">(' + (devise === 'CDF' ? formatUSD(solde) : formatCDF(solde * taux)) + ')</span>';
+      $('#pLibelle', f.el).textContent = devise === 'CDF' ? 'Montant en francs (FC)' : 'Montant en dollars ($)';
+      $('#pMontant', f.el).value = String(resteEn(devise));
+    };
+    majAffichage();
+    $$('#devises button', f.el).forEach((b) => b.addEventListener('click', () => {
+      devise = b.dataset.dev;
+      $$('#devises button', f.el).forEach((x) => x.classList.toggle('actif', x === b));
+      majAffichage();
+    }));
     $('#pOk', f.el).addEventListener('click', async () => {
       const v = lireNombre($('#pMontant', f.el).value);
       if (isNaN(v) || v <= 0) { toast('Entrez un montant supérieur à 0', 'erreur'); return; }
       const usd = arrondi(versUSD(v, devise, App.taux()), 6);
-      if (usd > solde + 0.01) { toast('Le montant dépasse ce que vous devez (' + formatUSD(solde) + ')', 'erreur'); return; }
+      if (usd > solde + 0.01) { toast('Le montant dépasse ce que vous devez (' + (devise === 'CDF' ? formatCDF(solde * taux) : formatUSD(solde)) + ')', 'erreur'); return; }
       const paiementLocalId = await DB.ajouter('dettesFournisseurs', { fournisseurId: fo.id, date: Date.now(), type: 'paiement', montantUSD: Math.min(usd, solde), devise, note: $('#pNote', f.el).value.trim() });
       try {
         await SyncManager.mettreEnFile('supplier_payment', {
@@ -345,7 +371,7 @@ const VueAchats = {
           p_amount: v, p_currency: devise, p_note: $('#pNote', f.el).value.trim()
         });
       } catch (_) {}
-      Audit.noter('Paiement fournisseur', fo.nom + ' ' + formatUSD(Math.min(usd, solde)));
+      Audit.log('paiement_fournisseur', { fournisseur: fo.nom, montant: arrondi(Math.min(usd, solde), 2), devise: devise, reste: arrondi(Math.max(0, solde - usd), 2) });
       f.fermer(); toast('Paiement enregistré', 'ok'); this.afficher($('#vue'));
     });
   }

@@ -299,3 +299,31 @@ div.cal-titre { cursor: default; }
 
 .mfa-qr { display:block; width:min(240px,80vw); height:auto; margin:12px auto; border-radius:12px; background:#fff; padding:10px; border:1px solid var(--couleur-bordure); }
 .mfa-secret { display:block; overflow-wrap:anywhere; margin-top:6px; font-size:.85rem; }
+
+/* ---------- Chargeur animé (logo EvoBuskin) ---------- */
+.eb-logo { display: block; filter: drop-shadow(0 6px 18px rgba(0,0,0,.35)); }
+.eb-barre { animation: eb-balayage 1.8s cubic-bezier(.45,.05,.55,.95) infinite; }
+.eb-iris { animation: eb-iris 1.8s ease-in-out infinite; }
+.eb-auvent { transform-box: fill-box; transform-origin: center bottom; animation: eb-auvent 1.8s ease-in-out infinite; }
+.eb-auvent.a1 { animation-delay: .00s; }
+.eb-auvent.a2 { animation-delay: .22s; }
+.eb-auvent.a3 { animation-delay: .44s; }
+.eb-auvent.a4 { animation-delay: .66s; }
+@keyframes eb-balayage { 0% { transform: translateX(0); opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(600px); opacity: 0; } }
+@keyframes eb-iris { 0%, 100% { transform: translateX(-9px); } 50% { transform: translateX(9px); } }
+@keyframes eb-auvent { 0%, 55%, 100% { transform: translateY(0) scale(1); filter: brightness(1); } 18% { transform: translateY(-6px) scale(1.04); filter: brightness(1.35); } }
+@media (prefers-reduced-motion: reduce) {
+  .eb-barre, .eb-iris, .eb-auvent { animation-duration: 3.6s; }
+}
+#chargement { gap: 14px; }
+#chargeurGlobal { position: fixed; inset: 0; z-index: 400; display: flex; align-items: center; justify-content: center; }
+#chargeurGlobal[hidden] { display: none !important; }
+#chargeurGlobal.chargeur-plein { background: rgba(6, 13, 31, .94); color: #fff; }
+#chargeurGlobal.chargeur-page { background: rgba(244, 247, 245, .78); color: #0b2a1a; backdrop-filter: blur(2px); }
+.chargeur-contenu { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 20px; }
+.chargeur-texte { margin: 0; font-weight: 700; font-size: 1rem; }
+
+/* ---------- Phrase de présentation (connexion / inscription) ---------- */
+.auth-slogan { text-align: center; margin: 4px 0 14px; color: #36524a; line-height: 1.35; }
+.auth-slogan b { display: block; font-size: .98rem; color: #0b5a2e; margin-bottom: 4px; }
+.auth-slogan span { display: block; font-size: .82rem; color: #5b6e68; }

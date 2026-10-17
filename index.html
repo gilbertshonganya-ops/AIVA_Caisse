@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0b7a3e">
   <meta name="description" content="EvoBuskin : caisse, stock et dettes clients, même sans Internet.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in; font-src 'self'; form-action 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co wss://*.supabase.in; font-src 'self'; form-action 'self';">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -25,7 +25,7 @@
       </div>
       <div class="barre-droite">
         <span id="etatReseau" class="pastille">En ligne</span>
-        <button id="btnQuitter" class="btn-icone" aria-label="Verrouiller">&#128274;</button>
+        <button id="btnQuitter" class="btn-icone" aria-label="Se déconnecter">&#128274;</button>
       </div>
     </header>
     <main id="vue"></main>
@@ -35,14 +35,17 @@
   <div id="toast" role="status" aria-live="polite"></div>
 
   <!-- Ordre important : utilitaires, base de données, modules, vues, puis application -->
+  <script src="js/chargeur.js"></script>
   <script src="js/auth-config.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/auth-hors-ligne.js"></script>
   <script src="js/auth-ui.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/periode.js"></script>
   <script src="js/db.js"></script>
   <script src="js/cloud-db.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/temps-reel.js"></script>
   <script src="js/cloud-sync.js"></script>
   <script src="js/audit.js"></script>
   <script src="js/pdf.js"></script>
@@ -59,6 +62,8 @@
   <script src="js/vue-rapports.js"></script>
   <script src="js/vue-plus.js"></script>
   <script src="js/vue-reglages.js"></script>
+  <script src="js/vue-compte.js"></script>
+  <script src="js/vue-boutiques.js"></script>
   <script src="js/equipe.js"></script>
   <script src="js/security-monitor.js"></script>
   <script src="js/subscriptions.js"></script>

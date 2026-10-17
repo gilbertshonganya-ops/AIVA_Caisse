@@ -30,12 +30,12 @@ const SyncManager = (() => {
   }
 
   function normalizeError(error) {
-    const message = String(error?.message || error || 'Erreur de synchronisation');
+    const message = Reseau.estErreurReseau(error) ? Reseau.MESSAGE : String(error?.message || error || 'Erreur de synchronisation');
     return message.slice(0, 500);
   }
 
   function permanent(message) {
-    return /BUSINESS_ACCESS_DENIED|CUSTOMER_ACCESS_DENIED|PRODUCT_NOT_FOUND|PRODUCT_ID_REQUIRED|OWNER_REQUIRED|IDEMPOTENCY_KEY_REUSE|INVALID_SALE_LINE|INSUFFICIENT_STOCK|CUSTOMER_REQUIRED_FOR_DEBT|STOCK_CONFLICT|STOCK_NEGATIVE|INVALID_PRODUCT_VALUES|INVALID_WHOLESALE_PRICE|INVALID_WHOLESALE_THRESHOLD|INVALID_CARTON_QUANTITY|CARTON_QUANTITY_REQUIRED|INVALID_CURRENCY|PRODUCT_NAME_REQUIRED|INVALID_STOCK_MOVEMENT_TYPE|ZERO_STOCK_ADJUSTMENT|IDEMPOTENCY_RESULT_MISSING|EMPTY_PURCHASE|INVALID_PURCHASE_QUANTITY|INVALID_PURCHASE_PRICE|PRODUCT_CURRENCY_MISMATCH|SUPPLIER_REQUIRED_FOR_DEBT|SUPPLIER_ACCESS_DENIED|SUPPLIER_NOT_FOUND|PAYMENT_EXCEEDS_SUPPLIER_BALANCE|INVALID_EXPENSE_AMOUNT|EXPENSE_CATEGORY_REQUIRED|EXPENSE_LIMIT_EXCEEDED|PURCHASE_LIMIT_EXCEEDED|EXCHANGE_RATE_NOT_CONFIGURED|INVALID_EXCHANGE_RATE|SUPPLIER_NAME_REQUIRED|CUSTOMER_NAME_REQUIRED|CUSTOMER_FIELD_TOO_LONG|CUSTOMER_NOT_FOUND|CUSTOMER_REQUIRED|INVALID_CUSTOMER_DEBT_AMOUNT|INVALID_CUSTOMER_PAYMENT_AMOUNT|PAYMENT_EXCEEDS_CUSTOMER_BALANCE|INVALID_PAYMENT_MODE/i.test(message);
+    return /BUSINESS_ACCESS_DENIED|CUSTOMER_ACCESS_DENIED|PRODUCT_NOT_FOUND|PRODUCT_ID_REQUIRED|OWNER_REQUIRED|IDEMPOTENCY_KEY_REUSE|INVALID_SALE_LINE|INSUFFICIENT_STOCK|CUSTOMER_REQUIRED_FOR_DEBT|STOCK_CONFLICT|STOCK_NEGATIVE|INVALID_PRODUCT_VALUES|INVALID_WHOLESALE_PRICE|INVALID_WHOLESALE_THRESHOLD|INVALID_CARTON_QUANTITY|CARTON_QUANTITY_REQUIRED|INVALID_CURRENCY|PRODUCT_NAME_REQUIRED|INVALID_STOCK_MOVEMENT_TYPE|ZERO_STOCK_ADJUSTMENT|IDEMPOTENCY_RESULT_MISSING|EMPTY_PURCHASE|INVALID_PURCHASE_QUANTITY|INVALID_PURCHASE_PRICE|PRODUCT_CURRENCY_MISMATCH|SUPPLIER_REQUIRED_FOR_DEBT|SUPPLIER_ACCESS_DENIED|SUPPLIER_NOT_FOUND|PAYMENT_EXCEEDS_SUPPLIER_BALANCE|INVALID_EXPENSE_AMOUNT|EXPENSE_CATEGORY_REQUIRED|EXPENSE_LIMIT_EXCEEDED|PURCHASE_LIMIT_EXCEEDED|EXCHANGE_RATE_NOT_CONFIGURED|INVALID_EXCHANGE_RATE|SUPPLIER_NAME_REQUIRED|CUSTOMER_NAME_REQUIRED|CUSTOMER_FIELD_TOO_LONG|CUSTOMER_NOT_FOUND|CUSTOMER_REQUIRED|INVALID_CUSTOMER_DEBT_AMOUNT|INVALID_CUSTOMER_PAYMENT_AMOUNT|PAYMENT_EXCEEDS_CUSTOMER_BALANCE|INVALID_PAYMENT_MODE|INVALID_ACTION|PAYLOAD_TOO_LARGE|CUSTOMER_HAS_DEBT/i.test(message);
   }
 
   async function envoyer(operation) {
@@ -93,6 +93,7 @@ const SyncManager = (() => {
           result = await CloudDB.enregistrerVenteAtomique(payload);
           break;
         }
+        case 'audit_event': result = await CloudDB.rpc('v19_log_event', { p_business_id: operation.businessId, p_action: payload.p_action, p_payload: payload.p_payload || {}, p_op_id: operation.idempotencyKey }); break;
         case 'product_create': result = await CloudDB.creerProduitSecurise(payload); break;
         case 'product_update': result = await CloudDB.modifierProduitSecurise(payload); break;
         case 'stock_adjust': result = await CloudDB.ajusterStockSecurise(payload); break;
@@ -192,6 +193,10 @@ const SyncManager = (() => {
       return true;
     } catch (e) {
       const message = normalizeError(e);
+      if (Reseau.estErreurReseau(e)) { // simple coupure : on ne compte pas d'échec et on réessaie dans 3 secondes
+        await DB.marquerSync(operation.id, { status: 'pending', attempts: operation.attempts || 0, lastError: message, nextAttemptAt: Date.now() + 3000 });
+        return false;
+      }
       const blocked = permanent(message);
       await DB.marquerSync(operation.id, {
         status: blocked ? 'blocked' : (tentative >= MAX_ATTEMPTS ? 'failed' : 'pending'),
@@ -202,15 +207,20 @@ const SyncManager = (() => {
     }
   }
 
+  let relancer = false;
   async function syncNow() {
-    if (running || !businessId || !navigator.onLine || !CloudDB.ready()) return;
+    if (!businessId || !navigator.onLine || !CloudDB.ready()) return;
+    if (running) { relancer = true; return; } // une opération arrivée pendant un envoi part juste après, sans attendre
     running = true;
     try {
-      const rows = await DB.syncQueueListe({ businessId, readyOnly: true });
-      for (const row of rows) {
-        if (!navigator.onLine) break;
-        await envoyer(row);
-      }
+      do {
+        relancer = false;
+        const rows = await DB.syncQueueListe({ businessId, readyOnly: true });
+        for (const row of rows) {
+          if (!navigator.onLine) break;
+          await envoyer(row);
+        }
+      } while (relancer);
     } finally {
       running = false;
     }
@@ -232,25 +242,38 @@ const SyncManager = (() => {
     return idempotencyKey;
   }
 
+  // Remet immédiatement « à envoyer » tout ce qui attendait (retour d'Internet, retour dans l'application)
+  async function forcer() {
+    if (!businessId) return;
+    const rows = await DB.syncQueueListe({ businessId });
+    for (const r of rows.filter((x) => x.status === 'pending')) await DB.marquerSync(r.id, { status: 'pending', nextAttemptAt: Date.now() });
+    return syncNow();
+  }
+
+  let ecouteOnline = null, ecouteVisible = null;
   function start() {
     stop();
-    const run = () => syncNow().catch(() => {});
-    window.addEventListener('online', run);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
-    timer = setInterval(run, 30000);
-    run();
+    ecouteOnline = () => forcer().catch(() => {});
+    ecouteVisible = () => { if (!document.hidden) forcer().catch(() => {}); };
+    window.addEventListener('online', ecouteOnline);
+    document.addEventListener('visibilitychange', ecouteVisible);
+    timer = setInterval(() => syncNow().catch(() => {}), 5000); // envoi quasi immédiat, même après une coupure
+    forcer().catch(() => {});
   }
 
   function stop() {
     if (timer) clearInterval(timer);
     timer = null;
+    if (ecouteOnline) window.removeEventListener('online', ecouteOnline);
+    if (ecouteVisible) document.removeEventListener('visibilitychange', ecouteVisible);
+    ecouteOnline = ecouteVisible = null;
   }
 
   function etat() {
     return { businessId, running };
   }
 
-  return { configure, uuid, mettreEnFile, syncNow, retryBlocked, start, stop, etat };
+  return { configure, uuid, mettreEnFile, syncNow, forcer, retryBlocked, start, stop, etat };
 })();
 
 window.SyncManager = SyncManager;

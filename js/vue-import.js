@@ -1,5 +1,5 @@
 /* EvoBuskin - IMPORT de produits depuis un fichier Excel (.xlsx) ou CSV (patron)
-   Le fichier .xlsx est lu directement dans le téléphone (aucune bibliothèque, aucun envoi sur Internet).
+   Le fichier .xlsx est lu directement dans le téléphone (aucune bibliothèque, les produits sont ensuite envoyés à votre compte).
    Les anciens fichiers .xls (Excel 97-2003) ne sont pas lus : les enregistrer en .xlsx ou en CSV. */
 
 // Lit un fichier .xlsx (une archive ZIP de fichiers XML) et retourne les lignes de la première feuille.
@@ -220,8 +220,32 @@ const VueImport = {
       go.disabled = true;
       try {
         await DB.importerProduits(nouveaux, misesAJour, App.nomVendeur());
+        // Envoi des produits importés (nom, stock, prix d'achat, prix de vente, seuil d'alerte...) pour qu'ils existent
+        // aussi sur vos autres appareils. Hors connexion, l'envoi part automatiquement au retour d'Internet.
+        const tous = await DB.tout('produits');
+        const idParNom = new Map(tous.map((x) => [x.nom.trim().toLowerCase(), x.id]));
+        const pos = (v) => (Number(v) > 0 ? Number(v) : null);
+        const base = (p, id) => ({
+          p_local_id: id, p_nom: p.nom, p_categorie: p.categorie || null, p_code_barres: p.codeBarres || null,
+          p_devise: p.devise, p_prix_achat: p.prixAchat || 0, p_prix_vente: p.prixVente || 0, p_stock_min: p.seuil || 0,
+          p_prix_gros: pos(p.prixGros), p_seuil_gros: pos(p.prixGros) ? pos(p.seuilGros) : null,
+          p_carton_qte: pos(p.cartonQte), p_prix_carton: pos(p.prixCarton), p_metadata: {}
+        });
+        let envoyes = 0;
+        try {
+          for (const p of nouveaux) {
+            const id = idParNom.get(p.nom.trim().toLowerCase());
+            if (!id) continue;
+            await SyncManager.mettreEnFile('product_create', Object.assign(base(p, id), { p_stock_initial: arrondi(p.stock, 3) }));
+            envoyes++;
+          }
+          for (const p of misesAJour) {
+            await SyncManager.mettreEnFile('product_update', Object.assign({ p_product_id: null }, base(p, p.id)));
+            envoyes++;
+          }
+        } catch (e) { console.warn('Import : envoi différé', e); }
         Audit.noter('Import CSV', nouveaux.length + ' nouveaux, ' + misesAJour.length + ' mis à jour, ' + erreurs.length + ' ignorés');
-        toast('Import terminé : ' + nouveaux.length + ' nouveaux, ' + misesAJour.length + ' mis à jour', 'ok');
+        toast('Import terminé : ' + nouveaux.length + ' nouveaux, ' + misesAJour.length + ' mis à jour' + (envoyes ? ' (envoi en cours)' : ''), 'ok');
         App.aller('stock');
       } catch (e) { go.disabled = false; toast(e.message || 'Import impossible', 'erreur'); }
     });

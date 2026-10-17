@@ -12,6 +12,8 @@ const Equipe = {
   listerInvitations() { return CloudDB.rpc('v17_list_invites', { p_business_id: App.businessId }); },
   revoquerInvitation(id) { return CloudDB.rpc('v17_revoke_invite', { p_business_id: App.businessId, p_invite_id: id }); },
   listerEquipe() { return CloudDB.rpc('v17_list_team', { p_business_id: App.businessId }); },
+  supprimerInvitation(id) { return CloudDB.rpc('v19_delete_invite', { p_business_id: App.businessId, p_invite_id: id }); },
+  purgerInvitations() { return CloudDB.rpc('v19_purge_invites', { p_business_id: App.businessId }); },
   retirerMembre(userId) { return CloudDB.rpc('v17_remove_member', { p_business_id: App.businessId, p_user_id: userId }); },
 
   lienInscription(code) {
@@ -23,13 +25,18 @@ const Equipe = {
 
   messageErreur(e) {
     const m = String((e && e.message) || e || '');
+    if (Reseau.estErreurReseau(e)) return Reseau.MESSAGE;
     if (/PLAN_LIMIT_REACHED/.test(m)) return 'La limite d’utilisateurs de votre plan est atteinte. Passez à un plan supérieur ou retirez un membre.';
     if (/TOO_MANY_PENDING_INVITES/.test(m)) return 'Trop d’invitations en attente (20 maximum). Révoquez-en quelques-unes.';
     if (/OWNER_REQUIRED/.test(m)) return 'Seul le propriétaire de la boutique peut gérer l’équipe.';
     if (/AAL2_REQUIRED/.test(m)) return 'Une authentification à deux facteurs est requise.';
     if (/CANNOT_REMOVE/.test(m)) return 'Ce membre ne peut pas être retiré.';
     if (/INVITE_NOT_FOUND|MEMBER_NOT_FOUND/.test(m)) return 'Élément introuvable ou déjà traité.';
-    if (/Failed to fetch|NetworkError|Session cloud/i.test(m)) return 'Connexion Internet nécessaire pour cette action.';
+    if (/BUSINESS_NAME_EXISTS/.test(m)) return 'Vous avez déjà une boutique avec ce nom.';
+    if (/INVALID_BUSINESS_NAME/.test(m)) return 'Le nom de la boutique doit avoir entre 2 et 120 caractères.';
+    if (/PENDING_OPERATIONS/.test(m)) return 'Des opérations ne sont pas encore envoyées. Restez connecté quelques instants puis réessayez.';
+    if (/INVITE_STILL_ACTIVE/.test(m)) return 'Cette invitation est encore valable : révoquez-la d’abord.';
+    if (/Session cloud/i.test(m)) return 'Connexion Internet nécessaire pour cette action.';
     return m || 'Une erreur est survenue.';
   },
 
@@ -52,8 +59,7 @@ const VueEquipe = {
       '<p class="petit">Le vendeur crée son compte avec un code à usage unique. Il pourra vendre, encaisser et consulter le stock, sans accès à vos finances, achats, dépenses ni réglages.</p>' +
       '<label class="champ"><span>Nom du vendeur (facultatif, pour vous repérer)</span><input id="eqNom" maxlength="60" autocomplete="off" placeholder="Ex. Marie"></label>' +
       '<label class="champ"><span>Durée de validité du code</span><select id="eqDuree"><option value="24">24 heures</option><option value="72" selected>3 jours</option><option value="168">7 jours</option></select></label>' +
-      '<label class="champ"><span>Nombre de codes à générer</span><select id="eqNombre"><option value="1">1 code</option><option value="2">2 codes</option><option value="5">5 codes</option><option value="10">10 codes</option><option value="20">20 codes</option></select></label>' +
-      '<p class="petit">La limite de votre abonnement reste appliquée par le serveur : générer plusieurs codes ne contourne pas le nombre de vendeurs autorisés.</p>' +
+      '<label class="champ"><span>Nombre de codes à générer</span><select id="eqNombre"><option value="1">1 code</option><option value="2">2 codes</option><option value="5">5 codes</option><option value="10">10 codes</option><option value="20">20 codes</option><option value="50">50 codes</option></select></label>' +
       '<button class="btn" id="eqCreer"' + (enLigne ? '' : ' disabled') + '>Générer une invitation</button>' +
       '<div id="eqResultat"></div></div>' +
       '<div class="carte"><h3 style="margin-top:0">Invitations</h3><div id="eqInvitations" class="petit">Chargement…</div></div>' +
@@ -69,7 +75,7 @@ const VueEquipe = {
   async creer() {
     const btn = $('#eqCreer', this.conteneur);
     btn.disabled = true;
-    const count = Math.min(20, Math.max(1, Number($('#eqNombre', this.conteneur).value) || 1));
+    const count = Math.min(50, Math.max(1, Number($('#eqNombre', this.conteneur).value) || 1));
     const label = $('#eqNom', this.conteneur).value.trim();
     const duree = Number($('#eqDuree', this.conteneur).value);
     const created = [];
@@ -122,20 +128,42 @@ const VueEquipe = {
       const rows = await Equipe.listerInvitations();
       if (!rows.length) { el.textContent = 'Aucune invitation pour le moment.'; return; }
       const etat = { actif: ['badge', 'En attente'], utilise: ['badge gris', 'Utilisée'], expire: ['badge orange', 'Expirée'], revoque: ['badge rouge', 'Révoquée'] };
-      el.innerHTML = '<div class="liste">' + rows.map((r) => {
+      const nbNettoyables = rows.filter((r) => r.status === 'expire' || r.status === 'revoque').length;
+      el.innerHTML = (nbNettoyables ? '<button class="btn gris" id="eqPurge" style="margin-bottom:10px">Supprimer les ' + nbNettoyables + ' invitation(s) expirée(s) ou révoquée(s)</button>' : '') +
+        '<div class="liste">' + rows.map((r) => {
         const e = etat[r.status] || ['badge gris', r.status];
         const det = r.status === 'utilise'
           ? 'Utilisée par ' + esc(r.used_by_name || 'un vendeur') + ' le ' + new Date(r.used_at).toLocaleDateString('fr-FR')
-          : 'Expire le ' + new Date(r.expires_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
-        return '<div class="ligne"><div><div class="nom">' + esc(r.label || 'Invitation') + ' <span class="petit">· …' + esc(r.code_hint) + '</span></div><div class="petit">' + det + '</div></div>' +
+          : (r.status === 'revoque' ? 'Révoquée' : (r.status === 'expire' ? 'Expirée le ' : 'Expire le ')) + (r.status === 'revoque' ? '' : new Date(r.expires_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }));
+        const bloc = (r.status === 'actif' && r.code)
+          ? '<div style="font-weight:800;letter-spacing:1px;margin-top:6px;word-break:break-all">' + esc(r.code) + '</div>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' +
+            '<button class="btn contour" data-lc="' + esc(r.id) + '" style="padding:4px 10px">Copier le code</button>' +
+            '<button class="btn contour" data-ll="' + esc(r.id) + '" style="padding:4px 10px">Copier le lien</button>' +
+            '<a class="btn" target="_blank" rel="noopener" style="padding:4px 10px;text-decoration:none" href="https://wa.me/?text=' + encodeURIComponent('Bonjour' + (r.label ? ' ' + r.label : '') + ', rejoins ma boutique sur EvoBuskin.\nOuvre ce lien, choisis « Vendeur » et crée ton compte :\n' + Equipe.lienInscription(r.code) + '\nCode d\'invitation : ' + r.code) + '">WhatsApp</a></div>'
+          : '';
+        return '<div class="ligne" style="align-items:flex-start"><div style="min-width:0"><div class="nom">' + esc(r.label || 'Invitation') + ' <span class="petit">· …' + esc(r.code_hint) + '</span></div><div class="petit">' + det + '</div>' + bloc + '</div>' +
           '<div style="text-align:right"><span class="' + e[0] + '">' + e[1] + '</span>' +
-          (r.status === 'actif' ? '<div><button class="btn gris" data-rev="' + esc(r.id) + '" style="margin-top:6px;padding:4px 10px">Révoquer</button></div>' : '') + '</div></div>';
+          (r.status === 'actif' ? '<div><button class="btn gris" data-rev="' + esc(r.id) + '" style="margin-top:6px;padding:4px 10px">Révoquer</button></div>' : '') +
+          (r.status === 'expire' || r.status === 'revoque' ? '<div><button class="btn gris" data-supp="' + esc(r.id) + '" style="margin-top:6px;padding:4px 10px">Supprimer</button></div>' : '') + '</div></div>';
       }).join('') + '</div>';
+      $$('[data-lc]', el).forEach((b) => b.addEventListener('click', () => Equipe.copier(rows.find((r) => r.id === b.dataset.lc).code)));
+      $$('[data-ll]', el).forEach((b) => b.addEventListener('click', () => Equipe.copier(Equipe.lienInscription(rows.find((r) => r.id === b.dataset.ll).code))));
       $$('[data-rev]', el).forEach((b) => b.addEventListener('click', async () => {
         if (!(await confirmer('Révoquer l\'invitation', 'Ce code ne pourra plus être utilisé.', 'Révoquer', true))) return;
         try { await Equipe.revoquerInvitation(b.dataset.rev); toast('Invitation révoquée', 'ok'); this.dernierCode = null; this.afficher(this.conteneur); }
         catch (e) { toast(Equipe.messageErreur(e), 'erreur'); }
       }));
+      $$('[data-supp]', el).forEach((b) => b.addEventListener('click', async () => {
+        try { await Equipe.supprimerInvitation(b.dataset.supp); toast('Invitation supprimée', 'ok'); this.chargerInvitations(); }
+        catch (e) { toast(Equipe.messageErreur(e), 'erreur'); }
+      }));
+      const purge = $('#eqPurge', el);
+      if (purge) purge.addEventListener('click', async () => {
+        if (!(await confirmer('Nettoyer les invitations', 'Supprimer toutes les invitations expirées ou révoquées ?', 'Supprimer', true))) return;
+        try { const n = await Equipe.purgerInvitations(); toast((Number(n) || 0) + ' invitation(s) supprimée(s)', 'ok'); this.chargerInvitations(); }
+        catch (e) { toast(Equipe.messageErreur(e), 'erreur'); }
+      });
     } catch (e) { el.textContent = Equipe.messageErreur(e); }
   },
 

@@ -52,7 +52,7 @@ const CloudSnapshotSync = (() => {
   async function tirer(options = {}) {
     if (running) return { ok: false, raison: 'sync-en-cours' };
     if (!businessId || !navigator.onLine || !CloudDB.ready()) return { ok: false, raison: 'hors-ligne' };
-    if (!options.force && Date.now() - lastSyncAt < 30000) return { ok: true, cache: true };
+    if (!options.force && Date.now() - lastSyncAt < 15000) return { ok: true, cache: true };
     running = true;
     try {
       const linkedBusiness = await DB.lireParam('cloudBusinessId', null);
@@ -217,13 +217,16 @@ const CloudSnapshotSync = (() => {
   }
   async function demarrer(id) {
     arreter(); businessId = id || null;
-    timer = setInterval(() => tirer().then((r) => { if (r.ok && App?.onglet === 'rapports') App.rafraichir(); }), 60000);
+    timer = setInterval(() => {
+      if (window.TempsReel && TempsReel.actif() && Date.now() - lastSyncAt < 120000) return; // le temps réel s'en charge
+      tirer().then((r) => { if (r.ok && !r.cache && window.TempsReel) TempsReel.rafraichirVue(); });
+    }, 20000);
     window.addEventListener('online', onOnline);
     const result = await tirer({ force: true });
     if (!result.ok && result.raison !== 'hors-ligne') console.warn('Snapshot cloud non téléchargé :', result.erreur || result.raison);
     return result;
   }
-  function onOnline() { tirer({ force: true }).then((r) => { if (r.ok && App?.onglet) App.rafraichir(); }); }
+  function onOnline() { tirer({ force: true }).then((r) => { if (r.ok && window.TempsReel) TempsReel.rafraichirVue(); }); }
   function arreter() { if (timer) clearInterval(timer); timer = null; window.removeEventListener('online', onOnline); businessId = null; lastSyncAt = 0; }
   return { tirer, demarrer, arreter };
 })();

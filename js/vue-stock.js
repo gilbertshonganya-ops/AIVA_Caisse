@@ -32,7 +32,7 @@ const VueStock = {
       '<div class="recherche"><input id="rechStock" type="search" placeholder="Chercher un produit" autocomplete="off" value="' + esc(this.recherche) + '">' +
       (App.estPatron() ? '<button class="btn" id="btnAjout" aria-label="Ajouter un produit">+</button>' : '') + '</div>' +
       '<div class="segment" id="filtres"><button data-f="tous">Tous</button><button data-f="alertes">Alertes (' + nbAlertes + ')</button><button data-f="prix">Prix à fixer (' + nbSansPrix + ')</button></div>' +
-      (App.estPatron() ? '<button class="btn contour" id="btnInventaire" style="margin-bottom:12px">Faire l\'inventaire</button>' : '') +
+      (App.estPatron() ? '<div class="ligne-boutons" style="margin-bottom:12px"><button class="btn contour" id="btnInventaire">Faire l\'inventaire</button><button class="btn gris" id="btnHistInv">Écarts passés</button></div>' : '') +
       '<div id="listeStock"></div>';
 
     $('#rechStock').addEventListener('input', (e) => { this.recherche = e.target.value; this.dessinerListe(); });
@@ -40,6 +40,7 @@ const VueStock = {
     if (App.estPatron()) {
       $('#btnAjout').addEventListener('click', () => this.formulaire(null));
       $('#btnInventaire').addEventListener('click', () => this.inventaire());
+      $('#btnHistInv').addEventListener('click', () => this.historiqueInventaires());
     }
     this.majFiltres();
     this.dessinerListe();
@@ -210,7 +211,7 @@ const VueStock = {
             p_devise: objet.devise, p_prix_achat: achat, p_prix_vente: vente, p_stock_initial: arrondi(stockDepart, 3),
             p_stock_min: seuil, p_prix_gros: gros, p_seuil_gros: seuilGros, p_carton_qte: cartonQte, p_prix_carton: prixCarton, p_metadata: {}
           });
-          Audit.log('produit_cree', { nom, prixVente: vente + ' ' + objet.devise, stock: stockDepart });
+          Audit.log('produit_cree', { nom, categorie: objet.categorie || '', prixAchat: achat, prixVente: vente, devise: objet.devise, stock: stockDepart });
         } else {
           const diff = {};
           [['nom', 'nom'], ['prixVente', 'prix de vente'], ['prixAchat', "prix d'achat"], ['prixGros', 'prix de gros'], ['prixCarton', 'prix du carton'], ['seuil', 'seuil'], ['devise', 'devise']]
@@ -222,43 +223,107 @@ const VueStock = {
             p_prix_gros: gros, p_seuil_gros: seuilGros, p_carton_qte: cartonQte, p_prix_carton: prixCarton, p_metadata: {}
           });
         }
-        f.fermer(); toast(nouveau ? 'Produit enregistré et mis en file de synchronisation' : 'Produit modifié et mis en file de synchronisation', 'ok'); App.rafraichir();
+        f.fermer(); toast(nouveau ? 'Produit enregistré' : 'Produit modifié', 'ok'); App.rafraichir();
       } catch (e) { toast('Erreur : ' + e.message, 'erreur'); }
     });
   },
 
-  // Inventaire : on compte physiquement et l'application corrige les différences
-  inventaire() {
+  // Inventaire : on compte physiquement ; l'application signale les ÉCARTS (manquants / en trop),
+  // corrige le stock, et le nombre compté devient le point de départ du prochain inventaire.
+  async inventaire() {
     const liste = [...this.produits].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     if (!liste.length) { toast('Aucun produit à compter', 'erreur'); return; }
+    const bases = await DB.lireParam('inventaireBase', {}) || {};
     const f = ouvrirFenetre('Inventaire',
-      '<p class="petit">Comptez chaque produit sur l\'étagère et écrivez la quantité réelle. Seules les différences seront corrigées.</p>' +
-      liste.map((p) => '<div class="ligne-panier"><div class="info"><div class="nom">' + esc(p.nom) + '</div><div class="petit">Dans l\'application : ' + formatQuantite(p.stock) + '</div></div>' +
-        '<div class="qte-ctrl"><input data-inv="' + p.id + '" inputmode="decimal" value="' + formatQuantite(p.stock).replace(/\s/g, '') + '"></div></div>').join('') +
-      '<button class="btn" id="invOk" style="margin-top:14px">Appliquer l\'inventaire</button>', { verrouille: true });
+      '<p class="petit">Comptez chaque produit sur l\'étagère et tapez la quantité réelle. Laissez vide un produit que vous ne comptez pas aujourd\'hui. Le nombre compté devient le point de départ du prochain inventaire.</p>' +
+      liste.map((p) => {
+        const b = bases[p.id];
+        return '<div class="ligne-panier"><div class="info"><div class="nom">' + esc(p.nom) + '</div>' +
+          '<div class="petit">Attendu : <b>' + formatQuantite(p.stock) + '</b>' + (b ? ' · dernier inventaire : ' + formatQuantite(b.compte) + ' le ' + formatDate(b.date) : '') + '</div>' +
+          '<div class="petit" data-ecart="' + p.id + '"></div></div>' +
+          '<div class="qte-ctrl"><input data-inv="' + p.id + '" inputmode="decimal" placeholder="Compté" autocomplete="off"></div></div>';
+      }).join('') +
+      '<button class="btn" id="invOk" style="margin-top:14px">Terminer l\'inventaire</button>', { verrouille: true });
+
+    // Écart affiché en direct pendant la saisie
+    $$('[data-inv]', f.el).forEach((inp) => inp.addEventListener('input', () => {
+      const p = liste.find((x) => x.id === Number(inp.dataset.inv));
+      const zone = $('[data-ecart="' + p.id + '"]', f.el);
+      if (inp.value.trim() === '') { zone.textContent = ''; return; }
+      const v = lireNombre(inp.value);
+      if (isNaN(v) || v < 0) { zone.innerHTML = '<span class="rouge-txt">Quantité invalide</span>'; return; }
+      const d = arrondi(v - p.stock, 3);
+      zone.innerHTML = d === 0 ? '<span class="vert-txt">✔ Conforme</span>'
+        : '<b class="rouge-txt">Écart : ' + (d > 0 ? '+' : '−') + formatQuantite(Math.abs(d)) + (d < 0 ? ' (manquant)' : ' (en trop)') + '</b>';
+    }));
+
     $('#invOk', f.el).addEventListener('click', async () => {
-      const changements = [];
+      const lignes = [];
       for (const inp of $$('[data-inv]', f.el)) {
+        if (inp.value.trim() === '') continue;
         const p = liste.find((x) => x.id === Number(inp.dataset.inv));
         const v = lireNombre(inp.value);
         if (isNaN(v) || v < 0) { toast('Quantité invalide pour « ' + p.nom + ' »', 'erreur'); inp.focus(); return; }
-        const delta = arrondi(v - p.stock, 3);
-        if (delta !== 0) changements.push({ p, delta });
+        lignes.push({ p, attendu: p.stock, compte: arrondi(v, 3), delta: arrondi(v - p.stock, 3) });
       }
-      if (!changements.length) { f.fermer(); toast('Aucune différence : le stock est exact'); return; }
-      if (!(await confirmer('Confirmer', changements.length + ' produit(s) seront corrigés. Continuer ?', 'Appliquer'))) return;
+      if (!lignes.length) { toast('Tapez au moins une quantité comptée', 'erreur'); return; }
+      const ecarts = lignes.filter((l) => l.delta !== 0);
+      const question = ecarts.length
+        ? ecarts.length + ' écart(s) détecté(s) sur ' + lignes.length + ' produit(s) compté(s). Corriger le stock avec les quantités comptées ?'
+        : 'Aucun écart sur les ' + lignes.length + ' produit(s) comptés. Enregistrer cet inventaire ?';
+      if (!(await confirmer('Terminer l\'inventaire', question, 'Enregistrer'))) return;
       try {
-        for (const c of changements) {
-          const expectedStock = c.p.stock;
-          await DB.ajusterStock(c.p.id, c.delta, 'inventaire', 'Inventaire', App.nomVendeur());
+        const taux = App.taux();
+        for (const l of ecarts) {
+          await DB.ajusterStock(l.p.id, l.delta, 'inventaire', 'Inventaire', App.nomVendeur());
           await SyncManager.mettreEnFile('stock_set', {
-            p_product_id: null, p_local_id: c.p.id, p_counted_stock: arrondi(expectedStock + c.delta, 3),
-            p_expected_stock: arrondi(expectedStock, 3), p_note: 'Inventaire'
+            p_product_id: null, p_local_id: l.p.id, p_counted_stock: l.compte,
+            p_expected_stock: arrondi(l.attendu, 3), p_note: 'Inventaire'
           });
         }
-        Audit.log('inventaire', { corrections: changements.length, details: changements.slice(0, 20).map((c) => c.p.nom + ' ' + (c.delta > 0 ? '+' : '') + formatQuantite(c.delta)).join(', ') });
-        f.fermer(); toast(changements.length + ' produit(s) corrigé(s)', 'ok'); App.rafraichir();
-      } catch (e) { toast(e.message, 'erreur'); }
+        // Le nombre compté devient le point de départ du prochain inventaire
+        const maintenant = Date.now();
+        const nouvellesBases = Object.assign({}, await DB.lireParam('inventaireBase', {}) || {});
+        lignes.forEach((l) => { nouvellesBases[l.p.id] = { compte: l.compte, date: maintenant }; });
+        await DB.ecrireParam('inventaireBase', nouvellesBases);
+        const rapport = {
+          date: maintenant, auteur: App.nomVendeur(), comptes: lignes.length,
+          lignes: ecarts.map((l) => ({
+            nom: l.p.nom, attendu: l.attendu, compte: l.compte, ecart: l.delta,
+            valeurUSD: arrondi(l.delta * versUSD(l.p.prixAchat || 0, l.p.devise, taux), 2)
+          }))
+        };
+        const histo = (await DB.lireParam('inventaires', []) || []).concat([rapport]).slice(-30);
+        await DB.ecrireParam('inventaires', histo);
+        Audit.log('inventaire', { corrections: ecarts.length, details: ecarts.slice(0, 20).map((c) => c.p.nom + ' ' + (c.delta > 0 ? '+' : '') + formatQuantite(c.delta)).join(', ') });
+        if (ecarts.length) {
+          Audit.log('inventaire_ecart', { texte: lignes.length + ' produit(s) comptés, ' + ecarts.length + ' écart(s) : ' +
+            ecarts.slice(0, 15).map((l) => l.p.nom + ' (attendu ' + formatQuantite(l.attendu) + ', compté ' + formatQuantite(l.compte) + ')').join(' ; ') });
+        }
+        f.fermer(); App.rafraichir();
+        this.afficherRapportInventaire(rapport);
+      } catch (e) { toast(Reseau.traduire(e), 'erreur'); }
     });
+  },
+
+  afficherRapportInventaire(r) {
+    const manque = r.lignes.filter((l) => l.ecart < 0), trop = r.lignes.filter((l) => l.ecart > 0);
+    const perte = manque.reduce((t, l) => t + l.valeurUSD, 0), gain = trop.reduce((t, l) => t + l.valeurUSD, 0);
+    const html = '<p class="petit">' + esc(formatDateHeure(r.date)) + ' · ' + esc(r.auteur) + ' · ' + r.comptes + ' produit(s) compté(s)</p>' +
+      (r.lignes.length
+        ? '<div class="bandeau rouge"><b>' + r.lignes.length + ' écart(s)</b>' + (manque.length ? ' · manquants : ' + formatUSD(Math.abs(perte)) + ' (au prix d\'achat)' : '') + (trop.length ? ' · en trop : ' + formatUSD(gain) : '') + '</div>' +
+          '<div class="liste">' + r.lignes.map((l) => '<div class="ligne" style="cursor:default"><div><div class="nom">' + esc(l.nom) + '</div><div class="sous">Attendu ' + formatQuantite(l.attendu) + ' → compté ' + formatQuantite(l.compte) + '</div></div>' +
+            '<div class="droite gras ' + (l.ecart < 0 ? 'rouge-txt' : 'vert-txt') + '">' + (l.ecart > 0 ? '+' : '−') + formatQuantite(Math.abs(l.ecart)) + '</div></div>').join('') + '</div>'
+        : '<div class="bandeau" style="background:#e1f3e8;color:#0b5a2e"><b>Aucun écart</b> : le stock de l\'application correspond à l\'étagère.</div>');
+    ouvrirFenetre('Résultat de l\'inventaire', html + '<p class="petit" style="margin-top:10px">Ces quantités comptées serviront de point de départ au prochain inventaire.</p>');
+  },
+
+  async historiqueInventaires() {
+    const histo = (await DB.lireParam('inventaires', []) || []).slice().reverse();
+    if (!histo.length) { toast('Aucun inventaire enregistré pour le moment'); return; }
+    const f = ouvrirFenetre('Inventaires passés',
+      '<div class="liste">' + histo.map((r, i) => '<div class="ligne" data-i="' + i + '"><div><div class="nom">' + esc(formatDateHeure(r.date)) + '</div><div class="sous">' + esc(r.auteur) + ' · ' + r.comptes + ' compté(s)</div></div>' +
+        '<div class="droite"><span class="badge ' + (r.lignes.length ? 'rouge' : '') + '">' + (r.lignes.length ? r.lignes.length + ' écart(s)' : 'Conforme') + '</span></div></div>').join('') + '</div>');
+    $$('[data-i]', f.el).forEach((el) => el.addEventListener('click', () => this.afficherRapportInventaire(histo[Number(el.dataset.i)])));
   }
 };

@@ -10,7 +10,7 @@ const App = {
   invitationInstall: null,
   essaisPin: 0,
   bloquePinJusqua: 0,
-  DELAI_VERROU_MS: 10 * 60 * 1000, // verrouillage automatique après 10 minutes sans toucher l'écran
+  sansJeton: false,      // true = ouvert sans Internet, sans jeton serveur (envoi en attente)
 
   // Liste des écrans. "roles" = qui a le droit de les voir. "parent" = écran rangé dans le menu Plus.
   onglets: [
@@ -18,13 +18,15 @@ const App = {
     { id: 'stock',    titre: 'Stock',    icone: '\u{1F4E6}', roles: ['patron', 'vendeur'], vue: () => VueStock },
     { id: 'dettes',   titre: 'Dettes',   icone: '\u{1F4D2}', roles: ['patron', 'vendeur'], vue: () => VueDettes },
     { id: 'rapports', titre: 'Rapports', icone: '\u{1F4CA}', roles: ['patron'],            vue: () => VueRapports },
+    { id: 'compte',   titre: 'Réglages',   icone: '\u2699\uFE0F', roles: ['vendeur'],           vue: () => VueCompte },
     { id: 'plus',     titre: 'Plus',     icone: '\u2630',    roles: ['patron'],            vue: () => VuePlus },
     { id: 'depenses', titre: 'Dépenses',  roles: ['patron'], parent: 'plus', vue: () => VueDepenses },
     { id: 'achats',   titre: 'Achats',    roles: ['patron'], parent: 'plus', vue: () => VueAchats },
     { id: 'import',   titre: 'Import',    roles: ['patron'], parent: 'plus', vue: () => VueImport },
     { id: 'audit',    titre: 'Journal',   roles: ['patron'], parent: 'plus', vue: () => VueAudit },
     { id: 'reglages', titre: 'Réglages',  roles: ['patron'], parent: 'plus', vue: () => VueReglages },
-    { id: 'equipe',   titre: 'Équipe',    roles: ['patron'], parent: 'plus', vue: () => VueEquipe }
+    { id: 'equipe',   titre: 'Équipe',    roles: ['patron'], parent: 'plus', vue: () => VueEquipe },
+    { id: 'boutiques', titre: 'Mes boutiques', roles: ['patron'], parent: 'plus', vue: () => VueBoutiques },
   ],
 
   // Bouton « Retour » placé en haut des écrans rangés dans Plus
@@ -37,7 +39,8 @@ const App = {
 
   estPatron() { return this.role === 'patron'; },
   taux() { return Number(this.reglages.taux) || 2800; },
-  nomVendeur() { return this.role === 'patron' ? 'Patron' : 'Vendeur'; },
+  nomComplet: '',
+  nomVendeur() { return this.nomComplet || (this.role === 'patron' ? 'Patron' : 'Vendeur'); },
 
   // Montant (en USD) affiché dans la devise principale choisie, l'autre devise en petit
   montantHtml(usd) {
@@ -64,8 +67,26 @@ const App = {
     $('#chargement').hidden = true;
     $('#app').hidden = false;
     const recoveryToken = window.AuthUI?.recupererTokenDeRecuperation?.();
-    if (recoveryToken) AuthUI.afficherNouveauMotDePasse(recoveryToken);
-    else this.afficherConnexion();
+    if (recoveryToken) { AuthUI.afficherNouveauMotDePasse(recoveryToken); return; }
+    await this.restaurerSession();
+  },
+
+  // Session longue : un simple rafraîchissement de la page (ou la fermeture/réouverture de l'application)
+  // ne demande plus le mot de passe. Fonctionne aussi sans Internet grâce au profil gardé sur l'appareil.
+  async restaurerSession() {
+    const session = Auth.getSession();
+    if (!session || !session.user) { this.afficherConnexion(); return; }
+    try {
+      await Chargeur.pendant(async () => {
+        if (navigator.onLine) { try { await Auth.ensureFreshSession(); } catch (e) { if (!e.reseau) throw e; } }
+        await this.apresAuthentification(Auth.getSession() || session);
+      }, 'Ouverture de votre boutique…');
+    } catch (e) {
+      console.warn('Session non restaurée :', e);
+      if (!Auth.getSession() && !(Reseau.estErreurReseau(e))) { this.afficherConnexion(); return; }
+      this.afficherConnexion();
+      const m = $('#authMessage'); if (m) { m.textContent = Reseau.traduire(e); m.className = 'auth-message erreur'; }
+    }
   },
 
   async chargerReglages() {
@@ -106,7 +127,9 @@ const App = {
     window.addEventListener('offline', majReseau);
     majReseau();
 
-    $('#btnQuitter').addEventListener('click', () => this.verrouiller());
+    $('#btnQuitter').addEventListener('click', async () => {
+      if (await confirmer('Se déconnecter', 'Vous devrez retaper votre mot de passe pour revenir dans l’application.', 'Se déconnecter')) this.deconnecter();
+    });
     // Bouton « Retour » des écrans du menu Plus (un seul écouteur pour tous les écrans)
     $('#vue').addEventListener('click', (e) => { if (e.target.closest('[data-retour]')) this.aller('plus'); });
     $('#vue').addEventListener('click', async (e) => {
@@ -120,16 +143,20 @@ const App = {
         const enAttente = await DB.syncQueueListe({ businessId: this.businessId });
         if (!enAttente.length && cloud.ok) toast('Toutes les opérations sont synchronisées.', 'ok');
         else toast(enAttente.length + ' opération(s) restent à synchroniser. Consultez le message d’erreur et vérifiez la connexion.', 'erreur');
-      } catch (err) { toast('Synchronisation impossible : ' + (err.message || err), 'erreur'); }
+      } catch (err) { toast(Reseau.estErreurReseau(err) ? Reseau.MESSAGE : 'Synchronisation impossible : ' + (err.message || err), 'erreur'); }
       finally { if (bouton.isConnected) bouton.disabled = false; await this.rafraichir(); }
     });
     ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, () => { this.derniereActivite = Date.now(); }, { passive: true }));
-    setInterval(() => {
-      if (this.role && Date.now() - this.derniereActivite > this.DELAI_VERROU_MS) {
-        this.verrouiller();
-        toast('Verrouillé automatiquement');
-      }
-    }, 20000);
+    // Retour d'Internet : on propose de se reconnecter si l'ouverture s'est faite sans Internet
+    window.addEventListener('online', () => {
+      AuthHorsLigne.envoyerEchecsEnAttente();
+      if (this.role && this.sansJeton && !Auth.getSession()) toast('Connexion rétablie. Reconnectez-vous pour envoyer vos ventes.', 'ok');
+    });
+    $('#vue').addEventListener('click', (e) => {
+      if (e.target.closest('#btnReconnecter')) this.reconnecter();
+      if (e.target.closest('[data-aller-compte]')) this.aller(this.estPatron() ? 'reglages' : 'compte');
+    });
+    $('#nomBoutique').addEventListener('click', () => { if (this.estPatron() && this.role) this.aller('boutiques'); });
 
     // Bouton "Installer l'application" proposé par Chrome
     window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); this.invitationInstall = e; });
@@ -139,6 +166,9 @@ const App = {
   verrouiller() {
     this.role = null;
     this.businessId = null;
+    this.sansJeton = false;
+    this.suppressionPrevue = null;
+    TempsReel.arreter();
     SyncManager.stop();
     CatalogueSync.arreter();
     CloudSnapshotSync.arreter();
@@ -146,6 +176,20 @@ const App = {
     $$('.fond-fenetre').forEach((f) => f.remove());
     document.body.classList.remove('modal-ouvert');
     Auth.signOut().finally(() => this.afficherConnexion());
+  },
+
+  // Déconnexion volontaire : on note l'événement dans le journal AVANT de fermer la session
+  async deconnecter() {
+    try {
+      if (this.businessId && navigator.onLine && Auth.getSession()) {
+        await Promise.race([
+          CloudDB.rpc('v19_log_event', { p_business_id: this.businessId, p_action: 'deconnexion', p_payload: { par: this.nomVendeur() }, p_op_id: SyncManager.uuid() }),
+          new Promise((ok) => setTimeout(ok, 2500))
+        ]);
+      }
+      await Audit.log('deconnexion', {});
+    } catch (_) { /* la déconnexion ne doit jamais être bloquée */ }
+    this.verrouiller();
   },
 
   afficherConnexion() {
@@ -158,13 +202,21 @@ const App = {
     const user = session?.user;
     if (!user) throw new Error('Session d’authentification introuvable.');
 
+    this.nomComplet = String(user.user_metadata?.full_name || '').trim();
     // Le rôle doit venir de la base sécurisée, jamais d'un champ contrôlé par le client.
     // Le profil sera créé/attribué par le backend Supabase dans l'étape suivante.
     let profile = null;
     try {
       profile = await Auth.getProfile(user.id, session.access_token);
+      if (profile) AuthHorsLigne.memoriserProfil(user.id, profile);
     } catch (e) {
-      throw new Error('Impossible de charger votre profil sécurisé. Vérifiez la configuration Supabase.');
+      if (e.status === 401 || e.status === 403) {
+        Auth.clearSession();
+        throw new Error('Votre session a expiré. Reconnectez-vous.');
+      }
+      // Pas d'Internet ou serveur momentanément indisponible : profil gardé sur l'appareil
+      profile = AuthHorsLigne.profil(user.id);
+      if (!profile) throw (Reseau.estErreurReseau(e) || !navigator.onLine ? Reseau.erreur() : new Error('Impossible de charger votre profil. Réessayez dans un instant.'));
     }
     if (!profile || !profile.role || !['patron', 'vendeur'].includes(profile.role)) {
       throw new Error('Votre compte est créé, mais votre rôle n’est pas encore configuré. Contactez l’administrateur.');
@@ -195,10 +247,69 @@ const App = {
       throw new Error(message);
     }
     if (!cloudPull?.ok && cloudPull?.raison !== 'hors-ligne') {
-      toast('Données serveur non téléchargées. Vérifiez la connexion et exécutez la migration V18 avant de gérer les ventes.', 'erreur');
+      toast('Vos données n’ont pas pu être mises à jour. Vérifiez votre connexion puis réessayez.', 'erreur');
     }
     if (profile.role === 'vendeur') CatalogueSync.demarrer(this.businessId);
+    TempsReel.demarrer(this.businessId);
     this.ouvrirSession(profile.role);
+    this.verifierSuppression();
+  },
+
+  // Changer de boutique (patron avec plusieurs boutiques). Les données de chaque boutique restent en ligne ;
+  // l'appareil ne garde que celles de la boutique ouverte, après avoir tout envoyé.
+  async changerBoutique(id) {
+    if (!navigator.onLine || !Auth.getSession()) throw Reseau.erreur();
+    if (String(id) === String(this.businessId)) return;
+    await SyncManager.syncNow();
+    const enAttente = (await DB.syncQueueListe({ businessId: this.businessId })).filter((x) => x.status !== 'synced');
+    if (enAttente.length) throw new Error('PENDING_OPERATIONS');
+    await CloudDB.rpc('v19_set_active_business', { p_business_id: id });
+    SyncManager.stop(); CatalogueSync.arreter(); CloudSnapshotSync.arreter(); TempsReel.arreter(); SyncManager.configure(null);
+    await DB.toutEffacer(['audit', 'sync_queue']);
+    Object.assign(this.reglages, { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', derniereSauvegarde: 0 });
+    this.suppressionPrevue = null;
+    await this.apresAuthentification(Auth.getSession());
+  },
+
+  // Suppression de compte demandée ? (affiche un rappel avec le bouton Annuler)
+  async verifierSuppression() {
+    try {
+      if (!navigator.onLine || !Auth.getSession()) return;
+      const quand = await CloudDB.rpc('v19_account_deletion_status', {});
+      this.suppressionPrevue = quand || null;
+    } catch (_) { /* sans importance */ }
+  },
+
+  // Connexion sans Internet : le profil vient de l'appareil (voir auth-hors-ligne.js)
+  async ouvrirSessionHorsLigne(user, profile) {
+    this.role = profile.role;
+    this.businessId = profile.business_id;
+    this.sansJeton = !Auth.getSession();
+    this.utilisateurLocal = user;
+    this.nomComplet = String(user.user_metadata?.full_name || '').trim();
+    SyncManager.configure(this.businessId);
+    this.reglages.nomBoutique = profile.business_name || this.reglages.nomBoutique;
+    $('#nomBoutique').textContent = this.reglages.nomBoutique || 'EvoBuskin';
+    this.ouvrirSession(profile.role);
+    toast('Mode hors ligne : vos ventes seront envoyées dès le retour d’Internet.');
+  },
+
+  // Après une ouverture hors ligne : se reconnecter avec Internet pour envoyer les opérations en attente
+  reconnecter() {
+    const email = this.utilisateurLocal?.email || '';
+    const f = ouvrirFenetre('Reconnexion au serveur',
+      '<p class="petit">Entrez votre mot de passe pour envoyer vos ventes et mettre à jour vos données.</p>' +
+      '<label class="champ"><span>Mot de passe</span><input id="rcMdp" type="password" autocomplete="current-password"></label>' +
+      '<div class="bandeau rouge" id="rcErr" hidden></div><button class="btn" id="rcOk">Se reconnecter</button>');
+    $('#rcOk', f.el).addEventListener('click', async () => {
+      const mdp = $('#rcMdp', f.el).value;
+      if (!mdp) return;
+      try {
+        const data = await Auth.signIn(email, mdp);
+        f.fermer();
+        this.sansJeton = false; await this.apresAuthentification(data);
+      } catch (e) { const er = $('#rcErr', f.el); er.textContent = /invalid login/i.test(e.message || '') ? 'Mot de passe incorrect.' : Reseau.traduire(e); er.hidden = false; }
+    });
   },
 
   ouvrirSession(role) {
@@ -225,7 +336,7 @@ const App = {
       await onglet.vue().afficher(vue);
     } catch (e) {
       console.error(e);
-      vue.innerHTML = '<div class="carte danger"><b>Une erreur est survenue</b><p class="petit">' + esc(e.message) + '</p></div>';
+      vue.innerHTML = '<div class="carte danger"><b>Une erreur est survenue</b><p class="petit">' + esc(Reseau.traduire(e)) + '</p></div>';
     }
   },
 
@@ -235,13 +346,21 @@ const App = {
   // ---------- Messages d'avertissement pour le patron ----------
   async bandeaux() {
     let html = '';
+    if (this.suppressionPrevue) {
+      html += '<div class="bandeau rouge"><b>Suppression de votre compte prévue le ' + esc(formatDate(new Date(this.suppressionPrevue).getTime())) + '.</b> Vos données seront alors effacées définitivement.' +
+        '<button class="btn contour" data-aller-compte style="margin-top:8px">Voir / annuler</button></div>';
+    }
+    if (this.sansJeton && navigator.onLine && !Auth.getSession()) {
+      html += '<div class="bandeau"><b>Mode hors ligne</b> : vos opérations ne sont pas encore envoyées au serveur.' +
+        '<button class="btn contour" id="btnReconnecter" style="margin-top:8px">Se reconnecter pour envoyer</button></div>';
+    }
     if (this.businessId) {
       const file = await DB.syncQueueListe({ businessId: this.businessId });
       const bloquees = file.filter((x) => x.status === 'blocked' || x.status === 'failed');
       const enAttente = file.filter((x) => x.status === 'pending' || x.status === 'sending');
       if (file.length) {
         const dernierMessage = file.slice().reverse().find((x) => x.lastError)?.lastError;
-        html += '<div class="bandeau ' + (bloquees.length ? 'rouge' : '') + '"><b>Synchronisation serveur</b> : ' +
+        html += '<div class="bandeau ' + (bloquees.length ? 'rouge' : '') + '"><b>Envoi des données</b> : ' +
           enAttente.length + ' en attente, ' + bloquees.length + ' en échec/bloquée.' +
           (dernierMessage ? '<div class="petit">Dernière erreur : ' + esc(dernierMessage) + '</div>' : '') +
           '<button class="btn contour" id="btnRetrySync" style="margin-top:8px">Réessayer la synchronisation</button></div>';
