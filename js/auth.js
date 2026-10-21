@@ -6,7 +6,7 @@ const Auth = (() => {
   function configure(){const c=CONFIG();return Boolean(c.supabaseUrl&&c.supabaseAnonKey)}
   function base(){return CONFIG().supabaseUrl.replace(/\/$/,'')}
   function headers(token){const c=CONFIG();const h={apikey:c.supabaseAnonKey,'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return h}
-  async function request(path,options={}){if(!configure())throw new Error('Supabase n\'est pas encore configuré.');if(typeof navigator!=='undefined'&&navigator.onLine===false)throw Reseau.erreur();let r;try{r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'})}catch(_){throw Reseau.erreur()}let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||('Erreur '+r.status+' '+path.split('?')[0]));e.code=d?.code||d?.error||r.status;e.status=r.status;throw e}return d}
+  async function request(path,options={}){if(!configure())throw new Error('Le service n\'est pas encore configuré. Contactez le support.');if(typeof navigator!=='undefined'&&navigator.onLine===false)throw Reseau.erreur();let r;try{r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'})}catch(_){throw Reseau.erreur()}let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||('Erreur '+r.status+' '+path.split('?')[0]));e.code=d?.code||d?.error||r.status;e.status=r.status;throw e}return d}
   function saveSession(s){if(!s){clearSession();return}const x={...s};delete x.password;localStorage.setItem(STORAGE_KEY,JSON.stringify(x));scheduleRefresh(x)}
   function getSession(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')}catch(_){return null}}
   function clearSession(){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=null;localStorage.removeItem(STORAGE_KEY)}
@@ -18,11 +18,23 @@ const Auth = (() => {
   // Appel d'une fonction publique du serveur (sans être connecté)
   async function rpcPublic(fn,args){return request('/rest/v1/rpc/'+fn,{method:'POST',body:JSON.stringify(args||{})})}
   // Changement de mot de passe : on vérifie l'ancien, puis on enregistre le nouveau
-  async function changerMotDePasse(email,ancien,nouveau){
+  // Changement de mot de passe. Si le compte est protégé par un code (MFA), Supabase exige une session « AAL2 » :
+  // on demande alors le code à 6 chiffres, on le vérifie, puis on réessaie avec la session renforcée.
+  async function changerMotDePasse(email,ancien,nouveau,codeMfa){
     const d=await signIn(email,ancien);
-    await updatePassword(d.access_token,nouveau);
     saveSession(d);
-    return d;
+    try{ await updatePassword(d.access_token,nouveau); }
+    catch(e){
+      if(!/AAL2|MFA|multi-?factor/i.test(String(e.message)))throw e;
+      if(!codeMfa){const err=new Error('MFA_REQUIRED');err.mfaRequis=true;throw err}
+      const f=await listFactors();
+      const facteur=(f.all||[]).find(x=>x.factor_type==='totp'&&x.status==='verified');
+      if(!facteur)throw e;
+      const ch=await challengeFactor(facteur.id);
+      await verifyFactor(facteur.id,ch.id,codeMfa);
+      await updatePassword(getSession().access_token,nouveau);
+    }
+    return getSession()||d;
   }
   async function resetPassword(email){return request('/auth/v1/recover',{method:'POST',body:JSON.stringify({email:email.trim().toLowerCase()})})}
   async function updatePassword(token,newPassword){return request('/auth/v1/user',{method:'PUT',accessToken:token,body:JSON.stringify({password:newPassword})})}

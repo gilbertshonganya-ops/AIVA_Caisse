@@ -12,7 +12,7 @@ const CloudDB = (() => {
   }
 
   async function request(table, options = {}) {
-    if (!ready()) throw new Error('Session cloud non disponible.');
+    if (!ready()) throw new Error('Votre session n’est pas active. Reconnectez-vous.');
     const c = CONFIG();
     const s = session();
     const base = c.supabaseUrl.replace(/\/$/, '') + '/rest/v1/' + table;
@@ -71,7 +71,7 @@ const CloudDB = (() => {
   }
 
   async function rpc(fn, args) {
-    if (!ready()) throw new Error('Session cloud non disponible.');
+    if (!ready()) throw new Error('Votre session n’est pas active. Reconnectez-vous.');
     const c = CONFIG();
     const s = session();
     let response;

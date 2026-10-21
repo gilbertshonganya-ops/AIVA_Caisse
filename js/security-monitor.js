@@ -3,7 +3,7 @@
  */
 const SecurityMonitor = (() => {
   async function getOpenAlerts(businessId) {
-    if (!window.CloudDB?.listerAlertesSecurite) throw new Error('Monitoring cloud indisponible.');
+    if (!window.CloudDB?.listerAlertesSecurite) throw new Error('Le suivi de sécurité n’est pas disponible.');
     return window.CloudDB.listerAlertesSecurite(businessId, 'open');
   }
 

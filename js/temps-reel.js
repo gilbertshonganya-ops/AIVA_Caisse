@@ -48,7 +48,6 @@ const TempsReel = (() => {
     clearTimeout(delai);
     delai = setTimeout(async () => {
       const r = await CloudSnapshotSync.tirer({ force: true });
-      if (App.role === 'vendeur' && window.CatalogueSync) { try { await CatalogueSync.tirer(); } catch (_) {} }
       if (r && r.ok) rafraichirVue();
     }, 600);
   }

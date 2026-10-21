@@ -90,12 +90,19 @@ const DB = (() => {
       nextAttemptAt: now,
       lastError: null,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      userId: uidCourant()
     }, operation || {});
     if (!ligne.type || !ligne.businessId || !ligne.idempotencyKey) {
       throw new Error('Opération de synchronisation invalide.');
     }
     return ajouter('sync_queue', ligne);
+  }
+
+  // Compte (utilisateur) actuellement connecté : une opération ne part qu'avec le compte qui l'a créée
+  function uidCourant() {
+    try { return (window.Auth && Auth.getSession() && Auth.getSession().user && Auth.getSession().user.id) || (window.App && App.utilisateurLocal && App.utilisateurLocal.id) || null; }
+    catch (_) { return null; }
   }
 
   async function syncQueueListe(options = {}) {
@@ -110,6 +117,7 @@ const DB = (() => {
     return rows
       .filter((r) => r.status !== 'synced')
       .filter((r) => options.businessId ? r.businessId === options.businessId : true)
+      .filter((r) => (options.userId && r.userId) ? r.userId === options.userId : true)
       .filter((r) => options.readyOnly ? r.nextAttemptAt <= now && r.status !== 'sending' : true)
       .sort((a,b) => a.createdAt - b.createdAt);
   }
@@ -163,7 +171,8 @@ const DB = (() => {
                 nextAttemptAt: now,
                 lastError: null,
                 createdAt: now,
-                updatedAt: now
+                updatedAt: now,
+                userId: uidCourant()
               });
             };
           }
@@ -398,7 +407,7 @@ const DB = (() => {
   }
 
   return { ouvrir, tout, lire, ecrire, ajouter, supprimer, lireParam, ecrireParam, transaction,
-           mettreEnFileSync, syncQueueListe, marquerSync, enregistrerVenteEtMettreEnFile,
+           mettreEnFileSync, syncQueueListe, uidCourant, marquerSync, enregistrerVenteEtMettreEnFile,
            enregistrerVente, annulerVente, ajusterStock, enregistrerAchat, importerProduits,
            exporterTout, importerTout, toutEffacer };
 })();

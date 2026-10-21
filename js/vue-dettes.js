@@ -163,8 +163,20 @@ const VueDettes = {
   brancherDevises(el) {
     const etat = { devise: 'USD' };
     $$('#devises button', el).forEach((b) => b.addEventListener('click', () => {
-      etat.devise = b.dataset.dev;
+      const ancienne = etat.devise, nouvelle = b.dataset.dev;
+      etat.devise = nouvelle;
       $$('#devises button', el).forEach((x) => x.classList.toggle('actif', x === b));
+      // Le montant déjà tapé est converti dans la devise choisie (dollars <-> francs)
+      const champ = $('#mMontant', el);
+      if (champ && nouvelle !== ancienne && champ.value.trim() !== '') {
+        const v = lireNombre(champ.value);
+        if (!isNaN(v) && v > 0) {
+          const usd = versUSD(v, ancienne, App.taux());
+          champ.value = String(nouvelle === 'CDF' ? Math.round(usd * App.taux()) : arrondi(usd, 2));
+        }
+      }
+      const lib = $('#mMontant', el) && $('#mMontant', el).closest('label') && $('#mMontant', el).closest('label').querySelector('span');
+      if (lib) lib.textContent = nouvelle === 'CDF' ? 'Montant en francs (FC)' : 'Montant en dollars ($)';
     }));
     return etat;
   },

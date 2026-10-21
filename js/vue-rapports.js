@@ -11,7 +11,7 @@ const VueRapports = {
     if (window.CloudSnapshotSync) {
       const cloud = await CloudSnapshotSync.tirer({ force: true });
       if (navigator.onLine && CloudDB.ready() && !cloud.ok) {
-        throw new Error('Impossible de confirmer les données serveur. Vérifiez la migration V18 et réessayez : les rapports locaux ne doivent pas être pris pour des rapports complets.');
+        throw new Error('Vos données complètes n’ont pas pu être chargées. Vérifiez votre connexion Internet puis réessayez : les rapports pourraient être incomplets.');
       }
     }
     const [ventesTout, dettes, produits, clients, depensesTout, achatsTout, dettesF, fournisseurs] = await Promise.all([

@@ -12,7 +12,7 @@ const Subscriptions = (() => {
   async function startCinetPayCheckout({businessId,planId,idempotencyKey}){
     if(!businessId||!planId) throw new Error('Business et plan requis.');
     const key = idempotencyKey || crypto.randomUUID();
-    if(!window.AUTH_CONFIG?.supabaseUrl || !window.AUTH_CONFIG?.supabaseAnonKey) throw new Error('Supabase non configuré.');
+    if(!window.AUTH_CONFIG?.supabaseUrl || !window.AUTH_CONFIG?.supabaseAnonKey) throw new Error('Le service n’est pas encore configuré. Contactez le support.');
     const session = await window.Auth?.ensureFreshSession?.();
     const accessToken = session?.access_token;
     if(!accessToken) throw new Error('Session expirée.');

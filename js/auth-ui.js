@@ -98,7 +98,7 @@ const AuthUI = (() => {
     if (/user already registered/i.test(msg)) return 'Un compte existe déjà avec cette adresse email.';
     if (/database error saving new user|unexpected_failure/i.test(msg)) return accountType === 'vendeur' ? 'Code d’invitation invalide, expiré ou déjà utilisé, ou limite d’utilisateurs atteinte. Demandez un nouveau code au propriétaire.' : 'Impossible de créer le compte pour le moment. Réessayez plus tard.';
     if (/rate limit/i.test(msg)) return 'Trop de demandes. Patientez quelques instants avant de réessayer.';
-    return msg;
+    return Reseau.lisible(msg);
   }
 
   function notice(message, type = '') {
@@ -153,7 +153,7 @@ const AuthUI = (() => {
         </div>
         ${passwordHTML('motDePasse', 'confirmationMotDePasse')}
         <div id="passwordMatch" class="password-match"></div>
-        <label class="auth-check"><input id="conditions" type="checkbox" required><span>J'accepte les conditions d'utilisation et la politique de confidentialité.</span></label>
+        <label class="auth-check"><input id="conditions" type="checkbox" required><span>J’accepte les <a href="conditions.html" target="_blank" rel="noopener">conditions d’utilisation</a> et la <a href="confidentialite.html" target="_blank" rel="noopener">politique de confidentialité</a>.</span></label>
         ${submitButton('Créer mon compte')}
       </form>
       <div class="auth-separator"><span>Déjà un compte ?</span></div>

@@ -14,6 +14,7 @@ const VueCompte = {
       '<label class="champ"><span>Mot de passe actuel</span><input id="mcAncien" type="password" autocomplete="current-password"></label>' +
       '<label class="champ"><span>Nouveau mot de passe</span><input id="mcNouveau" type="password" autocomplete="new-password"></label>' +
       '<label class="champ"><span>Confirmer le nouveau mot de passe</span><input id="mcConfirm" type="password" autocomplete="new-password"></label>' +
+      '<label class="champ" id="mcCodeZone" hidden><span>Code de sécurité à 6 chiffres</span><input id="mcCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></label>' +
       '<p class="petit">12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.</p>' +
       '<div class="bandeau rouge" id="mcErreur" hidden></div>' +
       '<button class="btn" id="mcOk">Changer mon mot de passe</button></div>' +
@@ -32,14 +33,15 @@ const VueCompte = {
       if (!email) return erreur('Compte introuvable. Reconnectez-vous.');
       const bouton = $('#mcOk'); bouton.disabled = true;
       try {
-        const data = await Auth.changerMotDePasse(email, ancien, nouveau);
+        const data = await Auth.changerMotDePasse(email, ancien, nouveau, ($('#mcCode').value || '').trim());
         await AuthHorsLigne.mettreAJourMotDePasse(email, nouveau, data.user);
         AuthHorsLigne.effacerEssais('mdp');
         await Audit.log('mot_de_passe_modifie', {});
-        $('#mcAncien').value = $('#mcNouveau').value = $('#mcConfirm').value = '';
+        $('#mcAncien').value = $('#mcNouveau').value = $('#mcConfirm').value = $('#mcCode').value = ''; $('#mcCodeZone').hidden = true;
         toast('Mot de passe modifié', 'ok');
       } catch (e) {
-        if (/invalid login credentials/i.test(String(e.message))) {
+        if (e.mfaRequis) { $('#mcCodeZone').hidden = false; $('#mcCode').focus(); erreur('Votre compte est protégé par un code de sécurité. Entrez le code à 6 chiffres de votre application d’authentification, puis appuyez de nouveau sur « Changer mon mot de passe ».'); }
+        else if (/invalid login credentials/i.test(String(e.message))) {
           AuthHorsLigne.compterEchec('mdp');
           Audit.log('mot_de_passe_incorrect', { texte: 'Mot de passe actuel incorrect lors d’un changement de mot de passe' });
           erreur('Le mot de passe actuel est incorrect.');

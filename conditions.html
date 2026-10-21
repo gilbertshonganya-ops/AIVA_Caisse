@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conditions d’utilisation — EvoBuskin</title><style>
+  :root{color-scheme:light dark;--vert:#0b5a2e;--fond:#f4f7f5;--texte:#1b2a22;--carte:#fff}
+  @media (prefers-color-scheme:dark){:root{--fond:#0f1a14;--texte:#e6efe9;--carte:#17261d;--vert:#6fd39a}}
+  *{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{background:#0b5a2e;color:#fff;padding:18px 16px}header a{color:#fff;text-decoration:none;font-weight:700}
+  main{max-width:760px;margin:0 auto;padding:16px}article{background:var(--carte);border-radius:14px;padding:18px 18px 8px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  h1{font-size:1.5rem;margin:.2em 0 .1em}h2{font-size:1.1rem;color:var(--vert);margin:1.4em 0 .3em}p,li{margin:.4em 0}.date{opacity:.7;font-size:.9rem}
+  .contact{font-weight:700}footer{max-width:760px;margin:0 auto;padding:8px 16px 30px;text-align:center;font-size:.9rem}footer a{color:var(--vert)}
+</style></head><body>
+<header><a href="index.html">‹ Retour à EvoBuskin</a></header>
+<main><article>
+<h1>Conditions d’utilisation</h1><p class="date">Dernière mise à jour : 21 octobre 2026</p>
+<p>Bienvenue sur EvoBuskin, une application de gestion de commerce : caisse, stock, dettes des clients, fournisseurs, dépenses et rapports. En créant un compte ou en utilisant l’application, vous acceptez les présentes conditions. Si vous n’êtes pas d’accord, n’utilisez pas le service.</p>
+<h2>1. Le service</h2>
+<p>EvoBuskin vous aide à enregistrer vos ventes, suivre votre stock, vos clients à crédit, vos fournisseurs et vos dépenses, et à consulter des rapports. L’application fonctionne avec ou sans connexion Internet : sans Internet, vos opérations sont gardées sur votre appareil et envoyées automatiquement au retour de la connexion.</p>
+<h2>2. Votre compte</h2>
+<ul><li>Vous devez fournir des informations exactes (nom, adresse email) et garder votre mot de passe secret.</li>
+<li>Vous êtes responsable de ce qui est fait avec votre compte. Prévenez-nous si vous pensez qu’il a été utilisé sans votre accord.</li>
+<li>Un compte <b>patron</b> peut créer une ou plusieurs boutiques et inviter des <b>vendeurs</b>. Le patron décide de qui peut accéder à ses boutiques et peut retirer un vendeur à tout moment.</li>
+<li>Vous devez avoir l’âge légal pour conclure un contrat, ou l’accord de votre représentant légal.</li></ul>
+<h2>3. Vos données, vos responsabilités</h2>
+<p>Les données de votre commerce (produits, prix, ventes, clients, dettes, fournisseurs) vous appartiennent. Vous êtes responsable de leur exactitude et de leur utilisation, notamment des informations sur vos clients : vous ne devez enregistrer que les données nécessaires à votre activité. Le journal d’activité enregistre qui a fait quoi, quand et dans quelle boutique, afin de protéger le patron et ses vendeurs.</p>
+<h2>4. Utilisation acceptable</h2>
+<p>Il est interdit d’utiliser EvoBuskin pour une activité illégale, de tenter d’accéder aux données d’autres utilisateurs, de perturber ou de contourner la sécurité du service, ou de copier l’application pour la revendre.</p>
+<h2>5. Disponibilité et sauvegardes</h2>
+<p>Nous faisons le maximum pour que le service soit disponible en permanence, mais il peut être interrompu pour maintenance ou en cas de problème technique. Faites régulièrement une sauvegarde de vos données depuis les Réglages. EvoBuskin ne remplace pas votre comptabilité officielle ni vos obligations fiscales.</p>
+<h2>6. Offres et paiement</h2>
+<p>EvoBuskin propose une offre gratuite et pourra proposer des abonnements payants offrant davantage de fonctionnalités et de capacité. Les prix, les limites de chaque offre et les moyens de paiement seront affichés dans l’application avant toute souscription. Nous vous préviendrons à l’avance de toute modification importante des offres.</p>
+<h2>7. Suppression du compte</h2>
+<p>Vous pouvez demander la suppression de votre compte à tout moment depuis Réglages → Mon compte. Vos données sont définitivement effacées <b>30 jours</b> après la demande ; vous pouvez annuler pendant ce délai. Pour un patron, la suppression efface ses boutiques et leurs données, et ses vendeurs perdent l’accès. Nous pouvons suspendre ou fermer un compte qui ne respecte pas ces conditions.</p>
+<h2>8. Responsabilité</h2>
+<p>Le service est fourni « tel quel ». Dans la limite permise par la loi, EvoBuskin n’est pas responsable des pertes indirectes (manque à gagner, erreurs de saisie, perte de données due à un appareil perdu sans sauvegarde, etc.). Rien dans ces conditions ne limite les droits que la loi vous reconnaît.</p>
+<h2>9. Modifications</h2>
+<p>Nous pouvons mettre à jour ces conditions. En cas de changement important, nous vous en informerons dans l’application. Continuer à utiliser EvoBuskin après la mise à jour vaut acceptation.</p>
+<h2>10. Droit applicable</h2>
+<p>Ces conditions sont régies par le droit applicable en République démocratique du Congo. En cas de désaccord, nous chercherons d’abord une solution amiable.</p>
+<p id="contact" class="contact"></p>
+</article></main>
+<footer><a href="conditions.html">Conditions d’utilisation</a> · <a href="confidentialite.html">Politique de confidentialité</a></footer>
+<script src="js/auth-config.js"></script>
+<script>
+  (function(){var c=window.AUTH_CONFIG||{},l=[];
+    if(c.supportEmail)l.push('par email : '+c.supportEmail);if(c.supportWhatsapp)l.push('par WhatsApp : '+c.supportWhatsapp);
+    var e=document.getElementById('contact');if(e){e.textContent=l.length?('Pour toute question, contactez-nous '+l.join(' ou ')+'.'):'Pour toute question, contactez le support depuis votre espace EvoBuskin.';}})();
+</script>
+</body></html>

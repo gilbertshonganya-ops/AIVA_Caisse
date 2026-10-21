@@ -75,11 +75,10 @@ const VueCaisse = {
       grille.style.display = 'block';
       grille.innerHTML = '<div class="carte vide">Aucun produit pour l\'instant.' +
         (App.estPatron()
-          ? '<div class="pile" style="margin-top:12px"><button class="btn" id="vaStock">Ajouter mes produits</button><button class="btn contour" id="vaDemo">Essayer avec des données de démonstration</button></div>'
+          ? '<div class="pile" style="margin-top:12px"><button class="btn" id="vaStock">Ajouter mes produits</button></div>'
           : '<br>Demandez au patron d\'ajouter les produits.') + '</div>';
       if (App.estPatron()) {
         $('#vaStock').addEventListener('click', () => App.aller('stock'));
-        $('#vaDemo').addEventListener('click', () => VueReglages.chargerDemo());
       }
       return;
     }

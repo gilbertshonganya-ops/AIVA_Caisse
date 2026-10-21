@@ -1,7 +1,7 @@
 /* EvoBuskin V17 — Équipe
    1) Equipe       : appels sécurisés vers les fonctions serveur (invitations, équipe).
    2) VueEquipe    : écran patron « Inviter un vendeur », invitations, équipe, activité.
-   3) CatalogueSync: côté VENDEUR, télécharge le catalogue de la boutique du patron
+   3) (le catalogue du vendeur est téléchargé comme celui du patron, par cloud-sync.js)
                      (produits, clients, taux) vers la base locale de l'appareil.
    Aucun secret serveur ici : tous les contrôles de rôle sont faits par Supabase. */
 
@@ -36,8 +36,8 @@ const Equipe = {
     if (/INVALID_BUSINESS_NAME/.test(m)) return 'Le nom de la boutique doit avoir entre 2 et 120 caractères.';
     if (/PENDING_OPERATIONS/.test(m)) return 'Des opérations ne sont pas encore envoyées. Restez connecté quelques instants puis réessayez.';
     if (/INVITE_STILL_ACTIVE/.test(m)) return 'Cette invitation est encore valable : révoquez-la d’abord.';
-    if (/Session cloud/i.test(m)) return 'Connexion Internet nécessaire pour cette action.';
-    return m || 'Une erreur est survenue.';
+    if (/session n’est pas active/i.test(m)) return 'Connexion Internet nécessaire pour cette action.';
+    return Reseau.lisible(m);
   },
 
   async copier(texte) {
@@ -64,7 +64,7 @@ const VueEquipe = {
       '<div id="eqResultat"></div></div>' +
       '<div class="carte"><h3 style="margin-top:0">Invitations</h3><div id="eqInvitations" class="petit">Chargement…</div></div>' +
       '<div class="carte"><h3 style="margin-top:0">Votre équipe</h3><div id="eqEquipe" class="petit">Chargement…</div></div>' +
-      '<div class="carte"><h3 style="margin-top:0">Activité des vendeurs (7 derniers jours)</h3><div id="eqActivite" class="petit">Chargement…</div></div>';
+      '<div class="carte"><h3 style="margin-top:0">Activité des vendeurs</h3><div id="eqActPeriode"></div><div id="eqActivite" class="petit">Chargement…</div></div>';
 
     $('#eqCreer', conteneur).addEventListener('click', () => this.creer());
     if (this.dernierCode) this.montrerCode(this.dernierCode);
@@ -183,12 +183,18 @@ const VueEquipe = {
     } catch (e) { el.textContent = Equipe.messageErreur(e); }
   },
 
+  periodeActivite: Periode.nouveau('jour'), // même sélecteur que les Rapports : Aujourd'hui / Autre date
+
   async chargerActivite() {
-    const el = $('#eqActivite', this.conteneur);
+    const el = $('#eqActivite', this.conteneur), zone = $('#eqActPeriode', this.conteneur);
+    zone.innerHTML = Periode.html(this.periodeActivite);
+    Periode.brancher(zone, this.periodeActivite, () => this.chargerActivite());
     try {
-      const depuis = new Date(Date.now() - 7 * 86400000).toISOString();
+      const b = Periode.bornes(this.periodeActivite);
+      const filtre = 'annulee=eq.false' + (b.debut > 0 ? '&date=gte.' + encodeURIComponent(new Date(b.debut).toISOString()) : '') +
+        (isFinite(b.fin) ? '&date=lt.' + encodeURIComponent(new Date(b.fin).toISOString()) : '');
       const [ventes, equipe] = await Promise.all([
-        CloudDB.list('sales', App.businessId, 'annulee=eq.false&date=gte.' + encodeURIComponent(depuis) + '&order=date.desc&limit=1000'),
+        CloudDB.list('sales', App.businessId, filtre + '&order=date.desc&limit=5000'),
         Equipe.listerEquipe()
       ]);
       const noms = {}; equipe.forEach((m) => { noms[m.user_id] = m.full_name || m.email || 'Vendeur'; });
@@ -206,10 +212,10 @@ const VueEquipe = {
       el.innerHTML = '<div class="liste">' + cles.map((k) => {
         const a = agr[k] || { n: 0, tot: {} };
         const totaux = Object.keys(a.tot).map((d) => a.tot[d].toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' ' + esc(d)).join(' · ') || '0';
-        return '<div class="ligne"><div><div class="nom">' + esc(noms[k] || 'Vendeur') + '</div><div class="petit">' + a.n + ' vente(s) sur 7 jours</div></div><div style="text-align:right"><b>' + totaux + '</b>' +
+        return '<div class="ligne" style="cursor:default"><div><div class="nom">' + esc(noms[k] || 'Vendeur') + '</div><div class="petit">' + a.n + ' vente(s) · ' + esc(Periode.libelle(this.periodeActivite)) + '</div></div><div style="text-align:right"><b>' + totaux + '</b>' +
           '<div><button class="btn contour" data-vendeur="' + esc(k) + '" data-nom="' + esc(noms[k] || 'Vendeur') + '" style="margin-top:6px;padding:4px 10px">Voir toutes ses ventes</button></div></div></div>';
       }).join('') + '</div><div id="eqDetailVendeur"></div>';
-      $$('[data-vendeur]', el).forEach((b) => b.addEventListener('click', () => this.voirVentesVendeur(b.dataset.vendeur, b.dataset.nom)));
+      $$('[data-vendeur]', el).forEach((bt) => bt.addEventListener('click', () => this.voirVentesVendeur(bt.dataset.vendeur, bt.dataset.nom)));
     } catch (e) { el.textContent = 'Activité indisponible : ' + Equipe.messageErreur(e); }
   },
 
@@ -239,95 +245,4 @@ const VueEquipe = {
 };
 
 /* ---------- Vendeur : catalogue de la boutique du patron ---------- */
-const CatalogueSync = (() => {
-  let timer = null, enCours = false, businessId = null, avertiAppareil = false, onlineHandler = null;
-  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-
-  async function appareilCompatible() {
-    const lie = await DB.lireParam('cloudBusinessId', null);
-    if (lie) return lie === businessId;
-    // Appareil jamais lié : accepté seulement s'il ne contient aucune donnée produit
-    return (await DB.tout('produits')).length === 0;
-  }
-
-  async function tirer() {
-    if (enCours || !businessId) return { ok: false, raison: 'occupe' };
-    if (!navigator.onLine || !CloudDB.ready()) return { ok: false, raison: 'hors-ligne' };
-    enCours = true;
-    try {
-      if (!(await appareilCompatible())) return { ok: false, raison: 'appareil' };
-      await SyncManager.syncNow();
-      const attente = (await DB.syncQueueListe({ businessId })).filter((r) => r.status === 'pending' || r.status === 'sending');
-      if (attente.length) return { ok: false, raison: 'en-attente' };
-
-      const [produits, clients, reglages] = await Promise.all([
-        CloudDB.list('products', businessId, 'actif=eq.true&order=nom.asc&limit=5000'),
-        CloudDB.list('customers', businessId, 'order=nom.asc&limit=5000'),
-        CloudDB.list('business_settings', businessId).catch(() => [])
-      ]);
-
-      const ids = new Set();
-      for (const r of produits) {
-        const id = Number(r.local_id);
-        if (!Number.isInteger(id) || id <= 0) continue;
-        ids.add(id);
-        const local = await DB.lire('produits', id);
-        await DB.ecrire('produits', Object.assign({}, local || {}, {
-          id, nom: r.nom, categorie: r.categorie || '', codeBarres: r.code_barres || '',
-          devise: r.devise || 'USD', prixAchat: 0, prixVente: num(r.prix_vente) || 0,
-          seuil: num(r.stock_min) || 0, stock: num(r.stock) || 0,
-          prixGros: num(r.prix_gros), seuilGros: num(r.seuil_gros),
-          cartonQte: num(r.carton_qte), prixCarton: num(r.prix_carton), actif: true
-        }));
-      }
-      for (const p of await DB.tout('produits')) {
-        if (!ids.has(p.id) && p.actif !== false) await DB.ecrire('produits', Object.assign({}, p, { actif: false }));
-      }
-
-      for (const c of clients) {
-        const id = Number(c.local_id);
-        if (!Number.isInteger(id) || id <= 0 || c.actif === false || c.deleted_at) continue;
-        const local = await DB.lire('clients', id);
-        await DB.ecrire('clients', Object.assign({}, local || {}, { id, nom: c.nom, tel: c.tel || '' }));
-      }
-
-      const taux = Number(reglages && reglages[0] && reglages[0].settings && reglages[0].settings.taux);
-      if (taux > 0) { App.reglages.taux = taux; await DB.ecrireParam('taux', taux); }
-
-      await DB.ecrireParam('cloudBusinessId', businessId);
-      await DB.ecrireParam('catalogueSyncAt', Date.now());
-      return { ok: true, produits: ids.size };
-    } catch (e) {
-      console.warn('Catalogue vendeur :', e);
-      return { ok: false, raison: 'erreur', erreur: e };
-    } finally { enCours = false; }
-  }
-
-  async function premierChargement() {
-    const r = await tirer();
-    if (r.ok) { if (App.onglet === 'caisse' || App.onglet === 'stock') App.rafraichir(); }
-    else if (r.raison === 'appareil' && !avertiAppareil) {
-      avertiAppareil = true;
-      toast('Cet appareil contient déjà les données d’une autre boutique. Utilisez un autre téléphone ou une fenêtre privée pour le compte vendeur.', 'erreur');
-    } else if (r.raison === 'hors-ligne') toast('Hors connexion : catalogue non mis à jour.');
-    return r;
-  }
-
-  function demarrer(id) {
-    arreter();
-    businessId = id;
-    premierChargement();
-    timer = setInterval(() => { tirer(); }, 120000);
-    onlineHandler = () => { tirer(); };
-    window.addEventListener('online', onlineHandler);
-  }
-  function arreter() {
-    if (timer) clearInterval(timer);
-    timer = null; businessId = null; avertiAppareil = false;
-    if (onlineHandler) window.removeEventListener('online', onlineHandler);
-    onlineHandler = null;
-  }
-  return { demarrer, arreter, tirer };
-})();
-
-window.Equipe = Equipe; window.VueEquipe = VueEquipe; window.CatalogueSync = CatalogueSync;
+window.Equipe = Equipe; window.VueEquipe = VueEquipe;

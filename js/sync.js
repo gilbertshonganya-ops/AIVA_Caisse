@@ -195,7 +195,7 @@ const SyncManager = (() => {
       const message = normalizeError(e);
       if (Reseau.estErreurReseau(e)) { // simple coupure : on ne compte pas d'échec et on réessaie dans 3 secondes
         await DB.marquerSync(operation.id, { status: 'pending', attempts: operation.attempts || 0, lastError: message, nextAttemptAt: Date.now() + 3000 });
-        return false;
+        return 'reseau';
       }
       const blocked = permanent(message);
       await DB.marquerSync(operation.id, {
@@ -215,10 +215,10 @@ const SyncManager = (() => {
     try {
       do {
         relancer = false;
-        const rows = await DB.syncQueueListe({ businessId, readyOnly: true });
+        const rows = await DB.syncQueueListe({ businessId, userId: DB.uidCourant(), readyOnly: true });
         for (const row of rows) {
           if (!navigator.onLine) break;
-          await envoyer(row);
+          if ((await envoyer(row)) === 'reseau') break; // on garde l'ordre : on reprend dans 3 secondes
         }
       } while (relancer);
     } finally {
@@ -235,7 +235,7 @@ const SyncManager = (() => {
   }
 
   async function mettreEnFile(type, payload) {
-    if (!businessId) throw new Error('Boutique cloud inconnue.');
+    if (!businessId) throw new Error('Boutique introuvable. Reconnectez-vous.');
     const idempotencyKey = uuid();
     await DB.mettreEnFileSync({ type, businessId, idempotencyKey, payload });
     syncNow().catch(() => {});
@@ -245,7 +245,7 @@ const SyncManager = (() => {
   // Remet immédiatement « à envoyer » tout ce qui attendait (retour d'Internet, retour dans l'application)
   async function forcer() {
     if (!businessId) return;
-    const rows = await DB.syncQueueListe({ businessId });
+    const rows = await DB.syncQueueListe({ businessId, userId: DB.uidCourant() });
     for (const r of rows.filter((x) => x.status === 'pending')) await DB.marquerSync(r.id, { status: 'pending', nextAttemptAt: Date.now() });
     return syncNow();
   }

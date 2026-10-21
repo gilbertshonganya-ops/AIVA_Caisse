@@ -134,7 +134,7 @@ const VueStock = {
         const expectedStock = p.stock;
         await DB.ajusterStock(p.id, delta, type, note, App.nomVendeur());
         await SyncManager.mettreEnFile('stock_adjust', { p_product_id: null, p_local_id: p.id, p_delta: arrondi(delta, 3), p_type: type, p_note: note, p_expected_stock: arrondi(expectedStock, 3) });
-        Audit.log(entree ? 'stock_entree' : 'stock_sortie', { produit: p.nom, qte: q, note });
+        Audit.log(entree ? 'stock_entree' : 'stock_sortie', { produit: p.nom, qte: q, note, stock: [expectedStock, arrondi(expectedStock + delta, 3)] });
         f.fermer(); toast(entree ? 'Entrée enregistrée' : 'Sortie enregistrée', 'ok'); App.rafraichir();
       } catch (e) { toast(e.message, 'erreur'); }
     });
@@ -290,15 +290,15 @@ const VueStock = {
           date: maintenant, auteur: App.nomVendeur(), comptes: lignes.length,
           lignes: ecarts.map((l) => ({
             nom: l.p.nom, attendu: l.attendu, compte: l.compte, ecart: l.delta,
-            valeurUSD: arrondi(l.delta * versUSD(l.p.prixAchat || 0, l.p.devise, taux), 2)
+            valeurUSD: arrondi(l.delta * versUSD(l.p.prixVente || 0, l.p.devise, taux), 2)
           }))
         };
         const histo = (await DB.lireParam('inventaires', []) || []).concat([rapport]).slice(-30);
         await DB.ecrireParam('inventaires', histo);
         Audit.log('inventaire', { corrections: ecarts.length, details: ecarts.slice(0, 20).map((c) => c.p.nom + ' ' + (c.delta > 0 ? '+' : '') + formatQuantite(c.delta)).join(', ') });
         if (ecarts.length) {
-          Audit.log('inventaire_ecart', { texte: lignes.length + ' produit(s) comptés, ' + ecarts.length + ' écart(s) : ' +
-            ecarts.slice(0, 15).map((l) => l.p.nom + ' (attendu ' + formatQuantite(l.attendu) + ', compté ' + formatQuantite(l.compte) + ')').join(' ; ') });
+          Audit.log('inventaire_ecart', { comptes: lignes.length, ecarts: ecarts.length,
+            produits: ecarts.slice(0, 12).map((l) => ({ nom: l.p.nom, attendu: l.attendu, compte: l.compte })) });
         }
         f.fermer(); App.rafraichir();
         this.afficherRapportInventaire(rapport);
@@ -311,7 +311,7 @@ const VueStock = {
     const perte = manque.reduce((t, l) => t + l.valeurUSD, 0), gain = trop.reduce((t, l) => t + l.valeurUSD, 0);
     const html = '<p class="petit">' + esc(formatDateHeure(r.date)) + ' · ' + esc(r.auteur) + ' · ' + r.comptes + ' produit(s) compté(s)</p>' +
       (r.lignes.length
-        ? '<div class="bandeau rouge"><b>' + r.lignes.length + ' écart(s)</b>' + (manque.length ? ' · manquants : ' + formatUSD(Math.abs(perte)) + ' (au prix d\'achat)' : '') + (trop.length ? ' · en trop : ' + formatUSD(gain) : '') + '</div>' +
+        ? '<div class="bandeau rouge"><b>' + r.lignes.length + ' écart(s)</b>' + (manque.length ? ' · manquants : ' + formatUSD(Math.abs(perte)) + ' (au prix de vente)' : '') + (trop.length ? ' · en trop : ' + formatUSD(gain) : '') + '</div>' +
           '<div class="liste">' + r.lignes.map((l) => '<div class="ligne" style="cursor:default"><div><div class="nom">' + esc(l.nom) + '</div><div class="sous">Attendu ' + formatQuantite(l.attendu) + ' → compté ' + formatQuantite(l.compte) + '</div></div>' +
             '<div class="droite gras ' + (l.ecart < 0 ? 'rouge-txt' : 'vert-txt') + '">' + (l.ecart > 0 ? '+' : '−') + formatQuantite(Math.abs(l.ecart)) + '</div></div>').join('') + '</div>'
         : '<div class="bandeau" style="background:#e1f3e8;color:#0b5a2e"><b>Aucun écart</b> : le stock de l\'application correspond à l\'étagère.</div>');

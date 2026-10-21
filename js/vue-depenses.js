@@ -68,7 +68,7 @@ const VueDepenses = {
           p_amount: dep.montant, p_currency: dep.devise, p_note: dep.note
         });
       } catch (_) {}
-      Audit.noter('Dépense ajoutée', 'n°' + id + ' ' + dep.categorie + ' ' + formatUSD(dep.montantUSD));
+      Audit.log('depense_ajoutee', { categorie: dep.categorie, montant: arrondi(dep.montantUSD, 2), devise: dep.devise, note: dep.note || '' });
       f.fermer(); toast('Dépense enregistrée', 'ok'); this.afficher($('#vue'));
     });
   },
@@ -79,10 +79,6 @@ const VueDepenses = {
       '<div class="liste"><div class="ligne" style="cursor:default"><span>Montant</span><span class="gras">' + formatUSD(d.montantUSD) + ' (' + formatCDF(d.montantUSD * (d.taux || App.taux())) + ')</span></div>' +
       '<div class="ligne" style="cursor:default"><span>Date</span><span>' + formatDate(d.date) + '</span></div>' +
       '<div class="ligne" style="cursor:default"><span>Note</span><span>' + esc(d.note || '-') + '</span></div></div>' +
-      '<button class="btn rouge" id="dSuppr">Supprimer cette dépense</button>');
-    $('#dSuppr', f.el).addEventListener('click', async () => {
-      if (!(await confirmer('Supprimer la dépense', 'Supprimer cette dépense de ' + formatUSD(d.montantUSD) + ' ?', 'Supprimer', true))) return;
-      toast('Une dépense financière ne doit pas être effacée physiquement. La fonction d\'annulation sécurisée sera ajoutée dans une prochaine migration.', 'erreur');
-    });
+      '<p class="petit">Une dépense enregistrée ne peut pas être effacée : cela protège vos comptes.</p>');
   }
 };

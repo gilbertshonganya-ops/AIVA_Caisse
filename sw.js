@@ -2,12 +2,12 @@
    Met en cache tous les fichiers de l'application pour qu'elle marche SANS Internet.
    IMPORTANT : quand vous modifiez un fichier, changez le numéro de VERSION ci-dessous
    pour que les téléphones téléchargent la nouvelle version. */
-const VERSION = 'evobuskin-v1.8.0';
+const VERSION = 'evobuskin-v1.9.0';
 const FICHIERS = [
   './', './index.html', './manifest.webmanifest',
   './css/style.css',
-  './js/chargeur.js', './js/temps-reel.js', './js/auth-hors-ligne.js', './js/utils.js', './js/periode.js', './js/db.js', './js/audit.js', './js/pdf.js', './js/coffre.js',
-  './js/scanner.js', './js/demo.js',
+  './conditions.html', './confidentialite.html', './js/chargeur.js', './js/temps-reel.js', './js/auth-hors-ligne.js', './js/utils.js', './js/periode.js', './js/db.js', './js/audit.js', './js/pdf.js', './js/coffre.js',
+  './js/scanner.js',
   './js/vue-caisse.js', './js/vue-stock.js', './js/vue-dettes.js', './js/vue-depenses.js',
   './js/vue-achats.js', './js/vue-import.js', './js/vue-audit.js', './js/vue-rapports.js',
   './js/vue-plus.js', './js/vue-reglages.js', './js/vue-compte.js', './js/vue-boutiques.js', './js/equipe.js', './js/app.js',
@@ -34,6 +34,8 @@ self.addEventListener('activate', (e) => {
 // Requêtes : le cache d'abord (rapide, hors connexion), sinon le réseau
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Les échanges avec le serveur en ligne ne passent jamais par le cache : une coupure d'Internet donne une vraie erreur réseau
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((reponse) => {
       if (reponse) return reponse;

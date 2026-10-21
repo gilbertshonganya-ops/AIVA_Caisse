@@ -135,7 +135,7 @@ function ouvrirLien(url) {
 let minuteurToast = null;
 function toast(message, type = '') {
   const el = $('#toast');
-  el.textContent = message;
+  el.textContent = (type === 'erreur' && window.Reseau) ? Reseau.lisible(message) : message;
   el.className = 'visible ' + type;
   clearTimeout(minuteurToast);
   minuteurToast = setTimeout(() => { el.className = ''; }, 3200);

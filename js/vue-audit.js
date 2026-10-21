@@ -42,7 +42,7 @@ const VueAudit = {
       mot_de_passe_incorrect: ['⚠️', 'Mot de passe actuel incorrect lors d’un changement de mot de passe', []],
       vente: ['🛒', 'Vente de ' + usd(p.total) + (p.client ? ' à ' + p.client : ''),
         L(articles(),
-          'Payé par : ' + (mode(p.mode) || '—') + (p.devise === 'CDF' ? ' (en francs)' : '') + (p.reference ? ' · réf. ' + p.reference : ''),
+          'Payé par : ' + (mode(p.mode) || '—') + (p.devise === 'CDF' && p.mode !== 'dette' ? ' (en francs)' : '') + (p.reference ? ' · réf. ' + p.reference : ''),
           'Total : ' + usd(p.total) + ' · Payé : ' + usd(p.paye != null ? p.paye : num(p.total) - num(p.reste)) + ' · Reste à payer : ' + usd(p.reste || 0))],
       vente_annulee: ['↩️', 'Vente annulée' + (p.id ? ' n°' + p.id : ''), L(p.total != null ? 'Total : ' + usd(p.total) : '', p.mode ? 'Payée par : ' + mode(p.mode) : '')],
       produit_cree: ['📦', 'Produit ajouté : ' + (p.nom || nom),
@@ -51,11 +51,11 @@ const VueAudit = {
           p.stock != null ? 'Stock de départ : ' + qte(p.stock) : '', p.via ? 'Ajouté via : ' + p.via : '')],
       produit_modifie: ['✏️', 'Produit modifié : ' + (p.produit || nom), diff(['produit'])],
       produit_desactive: ['🗑️', 'Produit supprimé : ' + (p.nom || nom), L(p.stock != null ? 'Stock au moment de la suppression : ' + qte(p.stock) : '')],
-      stock_entree: ['📥', 'Entrée de stock : ' + (p.produit || nom), L('Quantité : +' + qte(p.qte), p.note ? 'Motif : ' + p.note : '')],
-      stock_sortie: ['📤', 'Sortie de stock : ' + (p.produit || nom), L('Quantité : −' + qte(p.qte), p.note ? 'Motif : ' + p.note : '')],
+      stock_entree: ['📥', 'Entrée de stock : ' + (p.produit || nom), L('Quantité ajoutée : +' + qte(p.qte), diff(['produit']), p.note ? 'Motif : ' + p.note : '')],
+      stock_sortie: ['📤', 'Sortie de stock : ' + (p.produit || nom), L('Quantité retirée : −' + qte(p.qte), diff(['produit']), p.note ? 'Motif : ' + p.note : '')],
       stock_ajuste: ['📦', 'Stock ajusté' + (nom ? ' : ' + nom : ''), L(p.delta != null ? signe(p.delta) : '', p.nouveau_stock != null ? 'Nouveau stock : ' + qte(p.nouveau_stock) : '')],
-      inventaire: ['📋', 'Inventaire' + (nom ? ' : ' + nom : ''), L(p.corrections != null ? p.corrections + ' correction(s) de stock' : '', p.details || '', p.delta != null ? 'Écart constaté : ' + signe(p.delta) : '')],
-      inventaire_ecart: ['📋', 'Inventaire terminé avec des écarts', [t]],
+      inventaire: ['📋', Number(p.corrections) === 0 ? 'Inventaire terminé : aucun écart' : 'Inventaire' + (nom ? ' : ' + nom : ''), L(p.corrections != null && Number(p.corrections) > 0 ? p.corrections + ' correction(s) de stock' : '', p.details || '', p.delta != null ? 'Écart constaté : ' + signe(p.delta) : '')],
+      inventaire_ecart: ['📋', 'Inventaire terminé : ' + (p.ecarts || '') + ' écart(s)', L(p.comptes != null ? p.comptes + ' produit(s) comptés' : '', (p.produits || []).map((x) => x.nom + ' : attendu ' + qte(x.attendu) + ' → compté ' + qte(x.compte) + ' (écart ' + signe(num(x.compte) - num(x.attendu)) + ')'), t)],
       import_produits: ['📥', 'Produits importés', [t]],
       achat: ['🚚', 'Achat de marchandises' + (p.fournisseur ? ' chez ' + p.fournisseur : ''),
         L(articles(), p.total != null ? 'Total : ' + usd(p.total) + ' · Payé : ' + usd(p.paye || 0) + ' · Reste à payer : ' + usd(p.reste || 0) : t)],
@@ -74,11 +74,11 @@ const VueAudit = {
       fournisseur_modifie: ['🚚', 'Fournisseur modifié : ' + (p.fournisseur || nom), diff(['fournisseur'])],
       fournisseur_supprime: ['🗑️', 'Fournisseur supprimé : ' + (p.fournisseur || nom), []],
       fournisseur_desactive: ['🗑️', 'Fournisseur supprimé' + (nom ? ' : ' + nom : ''), []],
-      depense_ajoutee: ['💸', 'Dépense ajoutée', L(t, p.amount_usd != null ? usd(p.amount_usd) : (p.amount != null ? usd(p.amount) : ''))],
+      depense_ajoutee: ['💸', 'Dépense ajoutée' + (p.categorie ? ' : ' + p.categorie : ''), L(p.montant != null ? 'Montant : ' + usd(p.montant) : (p.amount_usd != null ? 'Montant : ' + usd(p.amount_usd) : ''), p.note ? 'Note : ' + p.note : '', t)],
       depense_supprimee: ['💸', 'Dépense supprimée', [t]],
       taux_modifie: ['💱', 'Taux de change modifié', Array.isArray(p.taux) ? ['Avant : 1 $ = ' + val(p.taux[0]) + ' FC → Après : 1 $ = ' + val(p.taux[1]) + ' FC'] : []],
       taux_change: ['💱', 'Taux de change modifié', [p.rate ? '1 $ = ' + Math.round(num(p.rate)).toLocaleString('fr-FR') + ' FC' : '']],
-      reglages_modifies: ['⚙️', 'Réglages de la boutique modifiés', []],
+      reglages_modifies: ['⚙️', 'Réglages de la boutique modifiés', diff([])],
       invitation_creee: ['✉️', 'Code d’invitation créé pour un vendeur', []],
       invitation_utilisee: ['✉️', 'Un vendeur a utilisé son code d’invitation', []],
       invitation_revoquee: ['✉️', 'Invitation annulée', []],
@@ -124,9 +124,28 @@ const VueAudit = {
     }
   },
 
+  // Lignes automatiques du serveur, remplacées par l'événement détaillé de l'application
+  GENERIQUES: ['vente', 'vente_annulee', 'produit_cree', 'produit_modifie', 'produit_desactive', 'stock_ajuste', 'inventaire',
+    'paiement_dette_client', 'dette_client_ajoutee', 'client_modifie', 'client_desactive', 'fournisseur_modifie',
+    'fournisseur_desactive', 'achat_fournisseur', 'paiement_fournisseur', 'depense_ajoutee', 'taux_change'],
+
+  // Retire les doublons : on garde seulement la ligne détaillée
+  sansDoublons(lignes) {
+    const t = (l) => new Date(l.created_at).getTime();
+    const ecarts = lignes.filter((l) => l.action === 'inventaire_ecart');
+    const creations = lignes.filter((l) => l.action === 'produit_cree');
+    return lignes.filter((l) => {
+      const p = l.payload || {};
+      if (this.GENERIQUES.includes(l.action) && !p.d) return false;                       // ligne courte du serveur
+      if (l.action === 'inventaire' && ecarts.some((e) => e.actor_user_id === l.actor_user_id && Math.abs(t(e) - t(l)) < 300000)) return false;
+      if (l.action === 'stock_entree' && creations.some((c) => c.actor_user_id === l.actor_user_id && (c.payload || {}).nom === p.produit && Math.abs(t(c) - t(l)) < 60000)) return false;
+      return true;
+    });
+  },
+
   filtrees() {
     const s = this.etat, cat = s.categorie ? this.CATEGORIES[s.categorie] : null;
-    return this.lignes.filter((l) => (!s.acteur || l.actor_user_id === s.acteur) && (!cat || cat.includes(l.action)));
+    return this.sansDoublons(this.lignes).filter((l) => (!s.acteur || l.actor_user_id === s.acteur) && (!cat || cat.includes(l.action)));
   },
 
   nomActeur(l) {

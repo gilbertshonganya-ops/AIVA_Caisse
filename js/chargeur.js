@@ -13,13 +13,52 @@ const Reseau = (() => {
     return /failed to fetch|networkerror|network request failed|load failed|fetch failed|network error|err_internet|err_network|the internet connection appears/i.test(m);
   }
   // Renvoie un texte lisible : le message réseau en français ou le message d'origine
-  function traduire(e) {
-    if (estErreurReseau(e)) return MESSAGE;
-    return String((e && e.message) || e || 'Une erreur est survenue.');
+  function traduire(e) { return lisible(e); }
+  // Codes du serveur -> phrases simples (bandeau « Envoi des données » et messages)
+  const CODES = [
+    [/CUSTOMER_REQUIRED_FOR_DEBT/, 'Une vente a un reste à payer mais aucun client : choisissez un client ou vérifiez les prix, puis appuyez sur Réessayer.'],
+    [/CUSTOMER_NOT_SYNCED|CUSTOMER_NOT_FOUND/, 'Le client de cette opération n’a pas encore pu être enregistré. Réessayez.'],
+    [/OWNER_REQUIRED/, 'Cette opération doit être envoyée avec le compte du patron. Connectez-vous avec le compte du patron puis appuyez sur Réessayer, ou abandonnez-la.'],
+    [/INSUFFICIENT_STOCK/, 'Stock insuffisant sur le serveur pour cette vente. Vérifiez le stock du produit.'],
+    [/PRODUCT_NOT_FOUND|PRODUCT_ID_REQUIRED/, 'Un produit de cette opération est introuvable. Actualisez vos données.'],
+    [/EXCHANGE_RATE_NOT_CONFIGURED/, 'Le taux de change n’est pas encore enregistré. Enregistrez-le dans Réglages.'],
+    [/INVALID_PAYMENT_AMOUNT|INVALID_SALE_LINE|INVALID_SALE_QUANTITY|EMPTY_CART/, 'Cette vente contient une valeur incorrecte.'],
+    [/IDEMPOTENCY_KEY_REUSE/, 'Cette opération a déjà été envoyée avec d’autres valeurs.'],
+    [/BUSINESS_ACCESS_DENIED|FORBIDDEN/, 'Vous n’avez pas accès à cette boutique pour cette opération.']
+  ];
+  const AUTRES = [
+    [/Invalid TOTP|TOTP code|code.*(invalid|incorrect)/i, 'Code de sécurité incorrect. Vérifiez le code à 6 chiffres affiché dans votre application d’authentification.'],
+    [/AAL2|MFA is enabled|multi-?factor/i, 'Une vérification de sécurité est nécessaire : entrez le code à 6 chiffres de votre application d’authentification.'],
+    [/Email not confirmed|EMAIL_NOT_CONFIRMED/i, 'Votre adresse email doit d’abord être confirmée. Ouvrez le message reçu par email.'],
+    [/User already registered|already been registered/i, 'Un compte existe déjà avec cette adresse email.'],
+    [/Invalid login credentials/i, 'Adresse email ou mot de passe incorrect.'],
+    [/Password should|weak password|password.*(short|least)/i, 'Mot de passe trop faible : 12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.'],
+    [/same password|different from the old/i, 'Le nouveau mot de passe doit être différent de l’ancien.'],
+    [/rate limit|too many requests|over_.*_rate_limit|429/i, 'Trop de demandes. Patientez quelques minutes puis réessayez.'],
+    [/JWT|token.*(expired|invalid)|refresh_token|session.*(expired|missing|not found)|AUTH_REQUIRED/i, 'Votre session a expiré. Reconnectez-vous.'],
+    [/duplicate key|already exists/i, 'Cet élément existe déjà.'],
+    [/permission denied|row-level security|not authorized|unauthorized|forbidden/i, 'Vous n’avez pas l’autorisation d’effectuer cette action.'],
+    [/timeout|timed out/i, 'Le serveur met trop de temps à répondre. Réessayez dans un instant.'],
+    [/CUSTOMER_NAME_REQUIRED/, 'Le nom du client est obligatoire.'],
+    [/TOO_MANY_PENDING_INVITES|PLAN_LIMIT_REACHED/, 'La limite de votre abonnement est atteinte.'],
+    [/IDEMPOTENCY/, 'Cette opération a déjà été enregistrée.'],
+    [/5\d\d|internal server error|bad gateway|service unavailable|unexpected_failure/i, 'Le service est momentanément indisponible. Réessayez dans un instant.']
+  ];
+  const GENERIQUE = 'Une erreur est survenue. Réessayez dans un instant ; si le problème continue, contactez le support.';
+  // Transforme TOUT message technique en phrase française ; un texte déjà en français est conservé
+  function lisible(texte) {
+    const m = String((texte && texte.message) || texte || '');
+    for (const [re, phrase] of CODES) if (re.test(m)) return phrase;
+    for (const [re, phrase] of AUTRES) if (re.test(m)) return phrase;
+    if (estErreurReseau(m)) return MESSAGE;
+    if (!m.trim()) return GENERIQUE;
+    // code technique (EN_MAJUSCULES, snake_case) ou message anglais : phrase française générale
+    if (/^[A-Z0-9_:\- .]{4,}$/.test(m.trim()) || /\b[a-z]+_[a-z_]+\b/.test(m) || /\b(error|failed|invalid|required|not found|denied|unable|cannot|could not|exception|undefined|null|object)\b/i.test(m)) return GENERIQUE;
+    return m;
   }
   // Crée une erreur marquée "réseau"
   function erreur() { const e = new Error(MESSAGE); e.reseau = true; e.code = 'NETWORK'; return e; }
-  return { MESSAGE, estErreurReseau, traduire, erreur };
+  return { MESSAGE, estErreurReseau, traduire, erreur, lisible };
 })();
 window.Reseau = Reseau;
 

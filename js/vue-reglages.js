@@ -24,15 +24,8 @@ const VueReglages = {
           '<button class="btn gris" id="rCsvVentes">Exporter les ventes (Excel/CSV)</button>' +
           '<button class="btn gris" id="rCsvStock">Exporter le stock (Excel/CSV)</button>' +
         '</div><p class="petit" style="margin-top:10px">La sauvegarde protégée est chiffrée (AES-256). Sans le mot de passe, personne ne peut la rouvrir, pas même nous.</p></div>' +
-
-      '<div class="carte"><h3>Données</h3><div style="height:8px"></div><div class="pile">' +
-        '<button class="btn contour" id="rDemo">Charger les données de démonstration</button>' +
-        '<button class="btn rouge" id="rEffacer">Tout effacer</button></div></div>' +
-
       '<div id="zoneCompte"></div>' +
-      '<div class="carte"><h3>Application</h3><div style="height:8px"></div><div class="pile">' +
-        '<button class="btn gris" id="rInstall">Installer sur l\'écran d\'accueil</button>' +
-        '<p class="petit texte-centre">EvoBuskin V19 &middot; vos données sur tous vos appareils</p></div></div>';
+      '<p class="petit texte-centre" style="margin:14px 0">EvoBuskin &middot; vos données sur tous vos appareils<br><a href="conditions.html" target="_blank" rel="noopener">Conditions d’utilisation</a> &middot; <a href="confidentialite.html" target="_blank" rel="noopener">Politique de confidentialité</a></p>';
 
     $('#rAff').value = r.affichage;
     VueCompte.afficher($('#zoneCompte'), true); // mot de passe et suppression de compte
@@ -42,8 +35,13 @@ const VueReglages = {
       if (!nom) { toast('Le nom de la boutique est obligatoire', 'erreur'); return; }
       const vt = validerTelRDC($('#rTel').value);
       if (!vt.ok) { toast(MESSAGE_TEL_RDC, 'erreur'); return; }
+      const avant = { nom: App.reglages.nomBoutique || '', tel: App.reglages.telBoutique || '' };
       await App.sauverReglage('nomBoutique', nom);
       await App.sauverReglage('telBoutique', vt.local);
+      const d = {};
+      if (avant.nom !== nom) d['nom de la boutique'] = [avant.nom || '-', nom];
+      if (avant.tel !== vt.local) d['téléphone de la boutique'] = [avant.tel || '-', vt.local || '-'];
+      if (Object.keys(d).length) Audit.log('reglages_modifies', d);
       toast('Boutique enregistrée', 'ok');
     });
 
@@ -58,7 +56,9 @@ const VueReglages = {
         } catch (_) {}
         Audit.log('taux_modifie', { taux: [ancienTaux, t] });
       }
-      await App.sauverReglage('affichage', $('#rAff').value);
+      const affAvant = r.affichage, affApres = $('#rAff').value;
+      await App.sauverReglage('affichage', affApres);
+      if (affAvant !== affApres) Audit.log('reglages_modifies', { 'devise affichée': [affAvant === 'CDF' ? 'Francs (FC)' : 'Dollars ($)', affApres === 'CDF' ? 'Francs (FC)' : 'Dollars ($)'] });
       toast('Taux enregistré : 1 $ = ' + formatCDF(t), 'ok');
       VueCaisse.panier = []; // les prix du panier dépendent du taux : on repart propre
     });
@@ -75,12 +75,6 @@ const VueReglages = {
     $('#fichierImport').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; this.restaurer(f); }); // value vidée : on peut rechoisir le même fichier
     $('#rCsvVentes').addEventListener('click', () => this.exporterCsvVentes());
     $('#rCsvStock').addEventListener('click', () => this.exporterCsvStock());
-    $('#rDemo').addEventListener('click', () => this.chargerDemo());
-    $('#rEffacer').addEventListener('click', () => this.toutEffacer());
-    $('#rInstall').addEventListener('click', async () => {
-      if (App.invitationInstall) { App.invitationInstall.prompt(); App.invitationInstall = null; }
-      else toast('Dans Chrome : menu ⋮ puis « Ajouter à l\'écran d\'accueil »');
-    });
   },
 
   // Demande un mot de passe dans une fenêtre. Retourne le texte saisi, ou null si annulé.
@@ -142,28 +136,6 @@ const VueReglages = {
     } catch (e) {
       toast(e instanceof SyntaxError ? 'Fichier illisible' : e.message, 'erreur');
     }
-  },
-
-  async chargerDemo() {
-    if (!(await confirmer('Données de démonstration', 'Cela remplace vos produits, ventes et clients actuels par un exemple de boutique. Vos réglages sont gardés. Continuer ?', 'Charger la démo'))) return;
-    const params = await DB.tout('params');
-    const demo = Demo.generer(App.taux(), params);
-    demo.donnees.audit = await DB.tout('audit'); // le journal d'audit n'est jamais remplacé par la démo
-    await DB.importerTout(demo);
-    await Audit.log('demo_chargee', {});
-    VueCaisse.panier = [];
-    toast('Démonstration chargée', 'ok');
-    App.aller('caisse');
-  },
-
-  async toutEffacer() {
-    if (!(await confirmer('Tout effacer', 'Produits, ventes, clients et dettes seront supprimés pour toujours. Avez-vous fait une sauvegarde ?', 'Tout effacer', true))) return;
-    if (!(await confirmer('Dernière question', 'Cette action est irréversible. Effacer vraiment ?', 'Oui, effacer', true))) return;
-    await DB.toutEffacer(['params', 'audit']); // on garde les réglages et le journal d'activité
-    await Audit.log('donnees_effacees', {});
-    VueCaisse.panier = [];
-    toast('Toutes les données ont été effacées');
-    App.aller('caisse');
   },
 
   // CSV avec « ; » et BOM : s'ouvre correctement dans Excel en français

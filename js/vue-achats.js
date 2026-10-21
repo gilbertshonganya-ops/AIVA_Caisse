@@ -355,9 +355,15 @@ const VueAchats = {
     };
     majAffichage();
     $$('#devises button', f.el).forEach((b) => b.addEventListener('click', () => {
-      devise = b.dataset.dev;
+      const ancienne = devise; devise = b.dataset.dev;
       $$('#devises button', f.el).forEach((x) => x.classList.toggle('actif', x === b));
+      const saisi = lireNombre($('#pMontant', f.el).value), restant = resteEn(ancienne);
       majAffichage();
+      // un montant partiel déjà tapé est converti (le montant « tout le reste » est recalculé par majAffichage)
+      if (!isNaN(saisi) && saisi > 0 && Math.abs(saisi - restant) > 0.005 && devise !== ancienne) {
+        const usd = versUSD(saisi, ancienne, taux);
+        $('#pMontant', f.el).value = String(devise === 'CDF' ? Math.round(usd * taux) : arrondi(usd, 2));
+      }
     }));
     $('#pOk', f.el).addEventListener('click', async () => {
       const v = lireNombre($('#pMontant', f.el).value);

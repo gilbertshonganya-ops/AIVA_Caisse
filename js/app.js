@@ -133,6 +133,7 @@ const App = {
     // Bouton « Retour » des écrans du menu Plus (un seul écouteur pour tous les écrans)
     $('#vue').addEventListener('click', (e) => { if (e.target.closest('[data-retour]')) this.aller('plus'); });
     $('#vue').addEventListener('click', async (e) => {
+      if (e.target.closest('#btnAbandonSync')) { this.abandonnerBloquees(); return; }
       const bouton = e.target.closest('#btnRetrySync');
       if (!bouton) return;
       bouton.disabled = true;
@@ -170,7 +171,6 @@ const App = {
     this.suppressionPrevue = null;
     TempsReel.arreter();
     SyncManager.stop();
-    CatalogueSync.arreter();
     CloudSnapshotSync.arreter();
     SyncManager.configure(null);
     $$('.fond-fenetre').forEach((f) => f.remove());
@@ -249,7 +249,6 @@ const App = {
     if (!cloudPull?.ok && cloudPull?.raison !== 'hors-ligne') {
       toast('Vos données n’ont pas pu être mises à jour. Vérifiez votre connexion puis réessayez.', 'erreur');
     }
-    if (profile.role === 'vendeur') CatalogueSync.demarrer(this.businessId);
     TempsReel.demarrer(this.businessId);
     this.ouvrirSession(profile.role);
     this.verifierSuppression();
@@ -264,11 +263,22 @@ const App = {
     const enAttente = (await DB.syncQueueListe({ businessId: this.businessId })).filter((x) => x.status !== 'synced');
     if (enAttente.length) throw new Error('PENDING_OPERATIONS');
     await CloudDB.rpc('v19_set_active_business', { p_business_id: id });
-    SyncManager.stop(); CatalogueSync.arreter(); CloudSnapshotSync.arreter(); TempsReel.arreter(); SyncManager.configure(null);
+    SyncManager.stop(); CloudSnapshotSync.arreter(); TempsReel.arreter(); SyncManager.configure(null);
     await DB.toutEffacer(['audit', 'sync_queue']);
     Object.assign(this.reglages, { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', derniereSauvegarde: 0 });
     this.suppressionPrevue = null;
     await this.apresAuthentification(Auth.getSession());
+  },
+
+  // Abandonne les opérations bloquées (elles ne seront jamais envoyées) — après confirmation
+  async abandonnerBloquees() {
+    const uid = DB.uidCourant();
+    const bloquees = (await DB.syncQueueListe({ businessId: this.businessId, userId: uid })).filter((x) => x.status === 'blocked' || x.status === 'failed');
+    if (!bloquees.length) return;
+    if (!(await confirmer('Abandonner les opérations bloquées', bloquees.length + ' opération(s) ne seront jamais envoyées au serveur (par exemple une vente de test). Cette action est définitive.', 'Abandonner', true))) return;
+    for (const r of bloquees) await DB.marquerSync(r.id, { status: 'synced', lastError: 'Abandonnée par l\'utilisateur' });
+    toast(bloquees.length + ' opération(s) abandonnée(s)', 'ok');
+    this.rafraichir();
   },
 
   // Suppression de compte demandée ? (affiche un rappel avec le bouton Annuler)
@@ -351,20 +361,25 @@ const App = {
         '<button class="btn contour" data-aller-compte style="margin-top:8px">Voir / annuler</button></div>';
     }
     if (this.sansJeton && navigator.onLine && !Auth.getSession()) {
-      html += '<div class="bandeau"><b>Mode hors ligne</b> : vos opérations ne sont pas encore envoyées au serveur.' +
+      html += '<div class="bandeau"><b>Mode hors ligne</b> : vos opérations ne sont pas encore envoyées.' +
         '<button class="btn contour" id="btnReconnecter" style="margin-top:8px">Se reconnecter pour envoyer</button></div>';
     }
     if (this.businessId) {
-      const file = await DB.syncQueueListe({ businessId: this.businessId });
+      const uid = DB.uidCourant();
+      const toutes = await DB.syncQueueListe({ businessId: this.businessId });
+      const file = toutes.filter((x) => !x.userId || x.userId === uid);
+      const autresComptes = toutes.length - file.length;
       const bloquees = file.filter((x) => x.status === 'blocked' || x.status === 'failed');
       const enAttente = file.filter((x) => x.status === 'pending' || x.status === 'sending');
       if (file.length) {
         const dernierMessage = file.slice().reverse().find((x) => x.lastError)?.lastError;
         html += '<div class="bandeau ' + (bloquees.length ? 'rouge' : '') + '"><b>Envoi des données</b> : ' +
           enAttente.length + ' en attente, ' + bloquees.length + ' en échec/bloquée.' +
-          (dernierMessage ? '<div class="petit">Dernière erreur : ' + esc(dernierMessage) + '</div>' : '') +
-          '<button class="btn contour" id="btnRetrySync" style="margin-top:8px">Réessayer la synchronisation</button></div>';
+          (dernierMessage ? '<div class="petit">Dernière erreur : ' + esc(Reseau.lisible(dernierMessage)) + '</div>' : '') +
+          '<button class="btn contour" id="btnRetrySync" style="margin-top:8px">Réessayer la synchronisation</button>' +
+          (bloquees.length ? '<button class="btn gris" id="btnAbandonSync" style="margin:8px 0 0 8px">Abandonner les opérations bloquées</button>' : '') + '</div>';
       }
+      if (autresComptes > 0) html += '<div class="bandeau">' + autresComptes + ' opération(s) enregistrée(s) avec un autre compte sur ce téléphone seront envoyées dès que ce compte se reconnecte.</div>';
     }
     if (!this.estPatron()) return html;
     const produits = (await DB.tout('produits')).filter((p) => p.actif !== false);

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Politique de confidentialité — EvoBuskin</title><style>
+  :root{color-scheme:light dark;--vert:#0b5a2e;--fond:#f4f7f5;--texte:#1b2a22;--carte:#fff}
+  @media (prefers-color-scheme:dark){:root{--fond:#0f1a14;--texte:#e6efe9;--carte:#17261d;--vert:#6fd39a}}
+  *{box-sizing:border-box}body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{background:#0b5a2e;color:#fff;padding:18px 16px}header a{color:#fff;text-decoration:none;font-weight:700}
+  main{max-width:760px;margin:0 auto;padding:16px}article{background:var(--carte);border-radius:14px;padding:18px 18px 8px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  h1{font-size:1.5rem;margin:.2em 0 .1em}h2{font-size:1.1rem;color:var(--vert);margin:1.4em 0 .3em}p,li{margin:.4em 0}.date{opacity:.7;font-size:.9rem}
+  .contact{font-weight:700}footer{max-width:760px;margin:0 auto;padding:8px 16px 30px;text-align:center;font-size:.9rem}footer a{color:var(--vert)}
+</style></head><body>
+<header><a href="index.html">‹ Retour à EvoBuskin</a></header>
+<main><article>
+<h1>Politique de confidentialité</h1><p class="date">Dernière mise à jour : 21 octobre 2026</p>
+<p>Votre vie privée compte. Cette page explique quelles données EvoBuskin collecte, pourquoi, et comment vous les contrôlez.</p>
+<h2>1. Les données que nous collectons</h2>
+<ul><li><b>Votre compte</b> : nom, adresse email, rôle (patron ou vendeur) et mot de passe. Le mot de passe est protégé : nous ne pouvons pas le lire.</li>
+<li><b>Les données de votre commerce</b> : produits, prix, stock, ventes, clients (nom, téléphone), dettes, fournisseurs, dépenses, taux de change et réglages.</li>
+<li><b>Le journal d’activité</b> : connexions, déconnexions, tentatives de connexion refusées, changements de mot de passe et actions effectuées (qui, quand, quelle boutique).</li>
+<li><b>Des données techniques</b> nécessaires au fonctionnement : type d’appareil et navigateur, et des données enregistrées sur votre appareil pour le mode hors ligne.</li></ul>
+<h2>2. Pourquoi nous les utilisons</h2>
+<p>Pour faire fonctionner l’application, synchroniser vos appareils, sécuriser votre compte, afficher vos rapports, permettre au patron de contrôler l’activité de ses vendeurs, et vous contacter au sujet de votre compte (confirmation d’email, récupération du mot de passe). Nous ne vendons pas vos données et ne les utilisons pas pour de la publicité.</p>
+<h2>3. Qui voit quoi</h2>
+<ul><li>Le <b>patron</b> voit les données de ses boutiques et le journal d’activité de ses vendeurs.</li>
+<li>Un <b>vendeur</b> voit ce qui est nécessaire à la vente (produits et prix de vente, clients, ses propres ventes). Il ne voit pas les prix d’achat, les achats, les dépenses ni le journal.</li>
+<li>Les autres utilisateurs d’EvoBuskin ne peuvent pas accéder à vos données.</li></ul>
+<h2>4. Où et comment elles sont protégées</h2>
+<p>Vos données sont conservées chez des prestataires d’hébergement et de messagerie qui agissent pour notre compte, et sur votre appareil pour le mode hors ligne. Les échanges sont chiffrés, l’accès est limité par compte et par boutique, et les actions sensibles sont enregistrées. Aucun système n’est infaillible : choisissez un mot de passe solide et ne le partagez pas.</p>
+<h2>5. Combien de temps</h2>
+<p>Nous gardons vos données tant que votre compte existe. Quand vous demandez la suppression, elles sont définitivement effacées après 30 jours (annulable pendant ce délai). L’historique du journal peut être limité dans la durée selon votre offre.</p>
+<h2>6. Vos droits</h2>
+<p>Vous pouvez à tout moment consulter vos données dans l’application, les corriger, en faire une sauvegarde (Réglages), changer votre mot de passe et demander la suppression de votre compte (Réglages → Mon compte). Pour toute autre demande concernant vos données, contactez-nous.</p>
+<h2>7. Les données de vos clients</h2>
+<p>Si vous enregistrez des informations sur vos propres clients (nom, téléphone, dettes), vous en êtes responsable : informez-les et ne gardez que ce qui est utile à votre activité. EvoBuskin agit comme prestataire technique pour ces informations.</p>
+<h2>8. Mineurs</h2>
+<p>EvoBuskin s’adresse aux professionnels et aux personnes ayant l’âge légal de contracter. Nous ne collectons pas sciemment de données sur des enfants.</p>
+<h2>9. Modifications</h2>
+<p>Nous pouvons mettre à jour cette politique ; en cas de changement important, nous vous en informerons dans l’application.</p>
+<p id="contact" class="contact"></p>
+</article></main>
+<footer><a href="conditions.html">Conditions d’utilisation</a> · <a href="confidentialite.html">Politique de confidentialité</a></footer>
+<script src="js/auth-config.js"></script>
+<script>
+  (function(){var c=window.AUTH_CONFIG||{},l=[];
+    if(c.supportEmail)l.push('par email : '+c.supportEmail);if(c.supportWhatsapp)l.push('par WhatsApp : '+c.supportWhatsapp);
+    var e=document.getElementById('contact');if(e){e.textContent=l.length?('Pour toute question, contactez-nous '+l.join(' ou ')+'.'):'Pour toute question, contactez le support depuis votre espace EvoBuskin.';}})();
+</script>
+</body></html>
