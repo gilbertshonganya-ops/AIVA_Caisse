@@ -27,6 +27,7 @@ const App = {
     { id: 'reglages', titre: 'Réglages',  roles: ['patron'], parent: 'plus', vue: () => VueReglages },
     { id: 'equipe',   titre: 'Équipe',    roles: ['patron'], parent: 'plus', vue: () => VueEquipe },
     { id: 'boutiques', titre: 'Mes boutiques', roles: ['patron'], parent: 'plus', vue: () => VueBoutiques },
+    { id: 'abonnement', titre: 'Mon abonnement', roles: ['patron'], parent: 'plus', vue: () => VueAbonnement },
   ],
 
   // Bouton « Retour » placé en haut des écrans rangés dans Plus
@@ -68,6 +69,7 @@ const App = {
     $('#app').hidden = false;
     const recoveryToken = window.AuthUI?.recupererTokenDeRecuperation?.();
     if (recoveryToken) { AuthUI.afficherNouveauMotDePasse(recoveryToken); return; }
+    Abonnement.lireRetourPaiement();
     await this.restaurerSession();
   },
 
@@ -156,6 +158,7 @@ const App = {
     $('#vue').addEventListener('click', (e) => {
       if (e.target.closest('#btnReconnecter')) this.reconnecter();
       if (e.target.closest('[data-aller-compte]')) this.aller(this.estPatron() ? 'reglages' : 'compte');
+      if (e.target.closest('[data-aller-abonnement]')) this.aller('abonnement');
     });
     $('#nomBoutique').addEventListener('click', () => { if (this.estPatron() && this.role) this.aller('boutiques'); });
 
@@ -170,6 +173,7 @@ const App = {
     this.sansJeton = false;
     this.suppressionPrevue = null;
     TempsReel.arreter();
+    Abonnement.arreter();
     SyncManager.stop();
     CloudSnapshotSync.arreter();
     SyncManager.configure(null);
@@ -250,7 +254,9 @@ const App = {
       toast('Vos données n’ont pas pu être mises à jour. Vérifiez votre connexion puis réessayez.', 'erreur');
     }
     TempsReel.demarrer(this.businessId);
+    Abonnement.demarrer();
     this.ouvrirSession(profile.role);
+    if (profile.role === 'patron' && Abonnement.paiementEnAttente()) this.aller('abonnement');
     this.verifierSuppression();
   },
 
@@ -263,7 +269,7 @@ const App = {
     const enAttente = (await DB.syncQueueListe({ businessId: this.businessId })).filter((x) => x.status !== 'synced');
     if (enAttente.length) throw new Error('PENDING_OPERATIONS');
     await CloudDB.rpc('v19_set_active_business', { p_business_id: id });
-    SyncManager.stop(); CloudSnapshotSync.arreter(); TempsReel.arreter(); SyncManager.configure(null);
+    SyncManager.stop(); CloudSnapshotSync.arreter(); TempsReel.arreter(); Abonnement.arreter(); SyncManager.configure(null);
     await DB.toutEffacer(['audit', 'sync_queue']);
     Object.assign(this.reglages, { taux: 2800, nomBoutique: 'Ma Boutique', telBoutique: '', affichage: 'USD', derniereSauvegarde: 0 });
     this.suppressionPrevue = null;
@@ -300,6 +306,7 @@ const App = {
     SyncManager.configure(this.businessId);
     this.reglages.nomBoutique = profile.business_name || this.reglages.nomBoutique;
     $('#nomBoutique').textContent = this.reglages.nomBoutique || 'EvoBuskin';
+    Abonnement.demarrer();
     this.ouvrirSession(profile.role);
     toast('Mode hors ligne : vos ventes seront envoyées dès le retour d’Internet.');
   },
@@ -342,6 +349,9 @@ const App = {
     $$('#menu button').forEach((b) => b.classList.toggle('actif', b.dataset.onglet === (onglet.parent || id)));
     const vue = $('#vue');
     vue.scrollTop = 0;
+    // Fonctions réservées à certains niveaux d'abonnement (le serveur applique aussi la règle)
+    const exigence = { achats: 'purchases', depenses: 'expenses', import: 'import' }[id];
+    if (exigence && !Abonnement.peut(exigence)) { Abonnement.pageBloquee(vue, exigence, onglet.titre); return; }
     try {
       await onglet.vue().afficher(vue);
     } catch (e) {
@@ -355,7 +365,7 @@ const App = {
 
   // ---------- Messages d'avertissement pour le patron ----------
   async bandeaux() {
-    let html = '';
+    let html = Abonnement.bandeau();
     if (this.suppressionPrevue) {
       html += '<div class="bandeau rouge"><b>Suppression de votre compte prévue le ' + esc(formatDate(new Date(this.suppressionPrevue).getTime())) + '.</b> Vos données seront alors effacées définitivement.' +
         '<button class="btn contour" data-aller-compte style="margin-top:8px">Voir / annuler</button></div>';

@@ -138,6 +138,7 @@ const VueRapports = {
     const plusVentes = $('#plusVentes');
     if (plusVentes) plusVentes.addEventListener('click', () => { this.limiteVentes += 30; this.afficher(conteneur); });
     $('#btnPdf').addEventListener('click', async () => {
+      if (!(await Abonnement.exiger('export_pdf', 'Rapport PDF'))) return;
       try {
         const nom = 'rapport-evobuskin-' + Periode.slug(this.periode) + '-' + new Date().toISOString().slice(0, 10) + '.pdf';
         await enregistrerFichier(nom, this.genererPdf(d), 'application/pdf');

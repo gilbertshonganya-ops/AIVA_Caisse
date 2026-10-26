@@ -177,6 +177,7 @@ const VueAudit = {
     const noms = {}; this.boutiques.forEach((b) => { noms[b.id] = b.name; });
     const opt = (v, lib, cur) => '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(lib) + '</option>';
     let html = App.entete('Journal d’activité') +
+      (Abonnement.limite('audit_days') !== null ? '<div class="petit" style="margin-bottom:8px">Historique conservé : ' + Abonnement.limite('audit_days') + ' jours (selon votre niveau).</div>' : '') +
       (this.depuisCache ? '<div class="bandeau">Pas de connexion Internet : dernière version enregistrée le ' + esc(formatDateHeure(this.dateCache)) + '.</div>' : '') +
       '<div class="carte">' + Periode.html(this.periode) +
 

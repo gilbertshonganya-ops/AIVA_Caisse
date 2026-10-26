@@ -327,3 +327,24 @@ div.cal-titre { cursor: default; }
 .auth-slogan { text-align: center; margin: 4px 0 14px; color: #36524a; line-height: 1.35; }
 .auth-slogan b { display: block; font-size: .98rem; color: #0b5a2e; margin-bottom: 4px; }
 .auth-slogan span { display: block; font-size: .82rem; color: #5b6e68; }
+
+/* ---------- Mon abonnement ---------- */
+.ab-niveau { font-size: 1.05rem; margin-bottom: 6px; }
+.ab-ligne { margin: 10px 0 2px; }
+.ab-tete { display: flex; justify-content: space-between; font-size: .88rem; }
+.ab-barre { height: 8px; background: #e3ebe6; border-radius: 6px; overflow: hidden; margin-top: 4px; }
+.ab-rempli { height: 100%; background: #0b7a3c; border-radius: 6px; }
+.ab-rempli.plein { background: #d64545; }
+.ab-grille { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0; }
+.ab-plan { position: relative; background: var(--carte, #fff); border: 2px solid #dfe7e2; border-radius: 16px; padding: 16px 14px; }
+.ab-plan.vedette { border-color: #0b7a3c; box-shadow: 0 4px 14px rgba(11, 122, 60, .18); }
+.ab-plan.courant { background: #f1faf4; }
+.ab-plan h3 { margin: 0 0 4px; font-size: 1.15rem; }
+.ab-badge { position: absolute; top: -11px; right: 12px; background: #0b7a3c; color: #fff; font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 12px; }
+.ab-prix { font-size: 1.7rem; font-weight: 800; }
+.ab-prix small { font-size: .85rem; font-weight: 600; opacity: .7; }
+.ab-liste { list-style: none; padding: 0; margin: 12px 0; font-size: .9rem; }
+.ab-liste li { padding: 3px 0; }
+.ab-liste li.ok { color: inherit; }
+.ab-liste li.non { opacity: .45; }
+.carte.ab-ok { border: 2px solid #0b7a3c; background: #f1faf4; }

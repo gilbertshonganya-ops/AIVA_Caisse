@@ -144,6 +144,7 @@ const VueReglages = {
     return '\uFEFF' + lignes.map((l) => l.map(cellule).join(';')).join('\r\n');
   },
   async exporterCsvVentes() {
+    if (!(await Abonnement.exiger('export_csv', 'Export CSV'))) return;
     const ventes = (await DB.tout('ventes')).sort((a, b) => a.date - b.date);
     const lignes = [['N°', 'Date', 'Heure', 'Articles', 'Total USD', 'Total FC', 'Bénéfice USD', 'Mode', 'Référence', 'Payé USD', 'Reste USD', 'Vendeur', 'Annulée']];
     ventes.forEach((v) => lignes.push([
@@ -154,6 +155,7 @@ const VueReglages = {
     await enregistrerFichier('evobuskin-ventes.csv', this.csv(lignes), 'text/csv');
   },
   async exporterCsvStock() {
+    if (!(await Abonnement.exiger('export_csv', 'Export CSV'))) return;
     const produits = (await DB.tout('produits')).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
     const lignes = [['Produit', 'Catégorie', 'Code-barres', 'Devise', 'Prix achat', 'Prix vente', 'Stock', 'Seuil alerte']];
     produits.forEach((p) => lignes.push([p.nom, p.categorie, p.codeBarres, p.devise, p.prixAchat, p.prixVente, p.stock, p.seuil]));

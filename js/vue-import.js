@@ -219,6 +219,7 @@ const VueImport = {
     if (!rien) go.addEventListener('click', async () => {
       go.disabled = true;
       try {
+        if (!(await Abonnement.verifierLimite('products', nouveaux.length))) return;
         await DB.importerProduits(nouveaux, misesAJour, App.nomVendeur());
         // Envoi des produits importés (nom, stock, prix d'achat, prix de vente, seuil d'alerte...) pour qu'ils existent
         // aussi sur vos autres appareils. Hors connexion, l'envoi part automatiquement au retour d'Internet.

@@ -24,7 +24,7 @@ const VueDettes = {
       '<button class="btn" id="btnClient" aria-label="Nouveau client">+</button></div>' +
       '<div id="listeClients"></div>';
     $('#rechClient').addEventListener('input', (e) => { this.recherche = e.target.value; this.dessinerListe(); });
-    $('#btnClient').addEventListener('click', () => this.formulaireClient(null));
+    $('#btnClient').addEventListener('click', async () => { if (await Abonnement.verifierLimite('customers')) this.formulaireClient(null); });
     this.dessinerListe();
   },
 
@@ -124,7 +124,8 @@ const VueDettes = {
     const paie = $('#dPaie', f.el);
     if (paie) paie.addEventListener('click', () => { f.fermer(); this.formulairePaiement(client, solde); });
     const rappel = $('#dRappel', f.el);
-    if (rappel) rappel.addEventListener('click', () => {
+    if (rappel) rappel.addEventListener('click', async () => {
+      if (!(await Abonnement.exiger('whatsapp', 'Rappel de dette par WhatsApp'))) return;
       const msg = 'Bonjour ' + client.nom + ', ici ' + (App.reglages.nomBoutique || 'la boutique') + '. Petit rappel : vous avez une dette de ' +
         formatUSD(solde) + ' (' + formatCDF(solde * App.taux()) + '). Merci de passer la régler dès que possible. Merci beaucoup !';
       ouvrirLien(lienWhatsApp(client.tel, msg));

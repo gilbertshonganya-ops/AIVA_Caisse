@@ -34,7 +34,8 @@ const VueBoutiques = {
     } catch (e) { toast(Equipe.messageErreur(e), 'erreur'); }
   },
 
-  ajouter() {
+  async ajouter() {
+    if (!(await Abonnement.verifierLimite('shops'))) return;
     const f = ouvrirFenetre('Nouvelle boutique',
       '<label class="champ"><span>Nom de la boutique</span><input id="bNom" maxlength="120" autocomplete="off" placeholder="Ex : Boutique Gombe"></label>' +
       '<div class="bandeau rouge" id="bErr" hidden></div><button class="btn" id="bOk">Créer la boutique</button>');

@@ -38,8 +38,8 @@ const VueStock = {
     $('#rechStock').addEventListener('input', (e) => { this.recherche = e.target.value; this.dessinerListe(); });
     $$('#filtres button').forEach((b) => b.addEventListener('click', () => { this.filtre = b.dataset.f; this.majFiltres(); this.dessinerListe(); }));
     if (App.estPatron()) {
-      $('#btnAjout').addEventListener('click', () => this.formulaire(null));
-      $('#btnInventaire').addEventListener('click', () => this.inventaire());
+      $('#btnAjout').addEventListener('click', async () => { if (await Abonnement.verifierLimite('products')) this.formulaire(null); });
+      $('#btnInventaire').addEventListener('click', async () => { if (await Abonnement.exiger('inventory', 'Inventaire avec écarts')) this.inventaire(); });
       $('#btnHistInv').addEventListener('click', () => this.historiqueInventaires());
     }
     this.majFiltres();
@@ -188,6 +188,7 @@ const VueStock = {
       if (isNaN(stockDepart) || stockDepart < 0) { toast('Le stock ne peut pas être négatif', 'erreur'); return; }
       const lireOpt = (id) => { const v = $(id, f.el).value.trim(); return v === '' ? null : lireNombre(v); };
       const gros = lireOpt('#fGros'), seuilGros = lireOpt('#fSeuilGros'), cartonQte = lireOpt('#fCartonQte'), prixCarton = lireOpt('#fCartonPrix');
+      if ((gros != null || prixCarton != null) && (gros !== (p.prixGros == null ? null : p.prixGros) || prixCarton !== (p.prixCarton == null ? null : p.prixCarton)) && !(await Abonnement.exiger('wholesale', 'Prix de gros et prix du carton'))) return;
       if (gros !== null && (isNaN(gros) || gros < 0)) { toast('Le prix de gros est invalide', 'erreur'); return; }
       if (gros !== null && (seuilGros === null || isNaN(seuilGros) || seuilGros < 2)) { toast('Indiquez à partir de combien d\'unités le prix de gros s\'applique (2 ou plus)', 'erreur'); return; }
       if (cartonQte !== null && (isNaN(cartonQte) || cartonQte < 2 || !Number.isInteger(cartonQte))) { toast('Un carton contient au moins 2 unités (nombre entier)', 'erreur'); return; }

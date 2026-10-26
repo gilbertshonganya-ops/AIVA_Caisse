@@ -46,8 +46,16 @@ const Reseau = (() => {
   ];
   const GENERIQUE = 'Une erreur est survenue. Réessayez dans un instant ; si le problème continue, contactez le support.';
   // Transforme TOUT message technique en phrase française ; un texte déjà en français est conservé
+  const NOMS_LIMITES = { shops: 'boutiques', sellers: 'vendeurs', sellers_per_shop: 'vendeurs dans cette boutique', products: 'produits', customers: 'clients à crédit', suppliers: 'fournisseurs', businesses: 'boutiques' };
   function lisible(texte) {
     const m = String((texte && texte.message) || texte || '');
+    const lim = m.match(/PLAN_LIMIT_REACHED:(\w+)/);
+    if (lim) return 'Votre niveau d’abonnement ne permet pas d’ajouter plus de ' + (NOMS_LIMITES[lim[1]] || 'éléments') + '. Le patron peut passer au niveau supérieur dans Plus → Mon abonnement.';
+    if (/FEATURE_NOT_INCLUDED/.test(m)) return 'Cette fonction n’est pas incluse dans votre niveau d’abonnement. Le patron peut passer au niveau supérieur dans Plus → Mon abonnement.';
+    if (/CINETPAY_INITIALIZATION_FAILED|CINETPAY_NOT_CONFIGURED|SERVER_CONFIG_MISSING|CHECKOUT_CREATE_FAILED/.test(m)) return 'Le service de paiement est momentanément indisponible. Réessayez dans un instant.';
+    if (/PLAN_NOT_AVAILABLE|PLAN_NOT_FOUND/.test(m)) return 'Ce niveau d’abonnement n’est pas disponible pour le moment.';
+    if (/PAYMENT_NOT_FOUND/.test(m)) return 'Paiement introuvable.';
+    if (/SUBSCRIPTION_/.test(m)) return 'L’abonnement n’a pas pu être traité. Contactez le support si vous avez payé.';
     for (const [re, phrase] of CODES) if (re.test(m)) return phrase;
     for (const [re, phrase] of AUTRES) if (re.test(m)) return phrase;
     if (estErreurReseau(m)) return MESSAGE;

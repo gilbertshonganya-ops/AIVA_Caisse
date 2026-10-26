@@ -73,6 +73,8 @@ const VueEquipe = {
   },
 
   async creer() {
+    const nb = Math.min(50, Math.max(1, Number($('#eqNombre', this.conteneur).value) || 1));
+    if (!(await Abonnement.verifierLimite('sellers', nb)) || !(await Abonnement.verifierLimite('sellers_per_shop', nb))) return;
     const btn = $('#eqCreer', this.conteneur);
     btn.disabled = true;
     const count = Math.min(50, Math.max(1, Number($('#eqNombre', this.conteneur).value) || 1));
@@ -173,7 +175,7 @@ const VueEquipe = {
       const rows = await Equipe.listerEquipe();
       el.innerHTML = '<div class="liste">' + rows.map((m) =>
         '<div class="ligne"><div><div class="nom">' + esc(m.full_name || m.email || 'Sans nom') + '</div><div class="petit">' + esc(m.email || '') + '</div></div>' +
-        '<div style="text-align:right"><span class="badge' + (m.is_owner ? '' : ' orange') + '">' + (m.is_owner ? 'Propriétaire' : 'Vendeur') + '</span>' +
+        '<div style="text-align:right"><span class="badge' + (m.is_owner ? '' : ' orange') + '">' + (m.is_owner ? 'Propriétaire' : 'Vendeur') + '</span>' + (m.suspended ? ' <span class="badge rouge">Suspendu</span>' : '') +
         (m.is_owner ? '' : '<div><button class="btn gris" data-ret="' + esc(m.user_id) + '" data-nom="' + esc(m.full_name || m.email) + '" style="margin-top:6px;padding:4px 10px">Retirer l\'accès</button></div>') + '</div></div>').join('') + '</div>';
       $$('[data-ret]', el).forEach((b) => b.addEventListener('click', async () => {
         if (!(await confirmer('Retirer l\'accès', b.dataset.nom + ' ne pourra plus accéder à votre boutique.', 'Retirer', true))) return;

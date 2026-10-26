@@ -309,6 +309,7 @@ const VueCaisse = {
           if (!nom) { toast('Écrivez le nom du nouveau client', 'erreur'); return; }
           const telSaisi = $('#ncTel', el).value.trim();
           const refus = (m) => { const e = $('#ncErreur', el); e.textContent = m; e.hidden = false; toast('Client non enregistré', 'erreur'); };
+          if (!(await Abonnement.verifierLimite('customers'))) return;
           const vt = validerTelRDC(telSaisi);
           if (!vt.ok) { refus(MESSAGE_TEL_RDC); return; }
           const doublon = VueDettes.verifierClient(nom, vt.local, clients, null); // même nom ou même numéro : refusé

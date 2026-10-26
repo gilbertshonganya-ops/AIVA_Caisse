@@ -2,7 +2,7 @@
    Met en cache tous les fichiers de l'application pour qu'elle marche SANS Internet.
    IMPORTANT : quand vous modifiez un fichier, changez le numéro de VERSION ci-dessous
    pour que les téléphones téléchargent la nouvelle version. */
-const VERSION = 'evobuskin-v1.9.0';
+const VERSION = 'evobuskin-v2.1.0';
 const FICHIERS = [
   './', './index.html', './manifest.webmanifest',
   './css/style.css',
@@ -10,7 +10,7 @@ const FICHIERS = [
   './js/scanner.js',
   './js/vue-caisse.js', './js/vue-stock.js', './js/vue-dettes.js', './js/vue-depenses.js',
   './js/vue-achats.js', './js/vue-import.js', './js/vue-audit.js', './js/vue-rapports.js',
-  './js/vue-plus.js', './js/vue-reglages.js', './js/vue-compte.js', './js/vue-boutiques.js', './js/equipe.js', './js/app.js',
+  './js/vue-plus.js', './js/vue-reglages.js', './js/vue-compte.js', './js/vue-boutiques.js', './js/abonnement.js', './js/equipe.js', './js/app.js',
   './js/auth-config.js', './js/auth.js', './js/auth-ui.js', './js/cloud-db.js', './js/sync.js', './js/cloud-sync.js',
   './js/security-monitor.js', './js/subscriptions.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',

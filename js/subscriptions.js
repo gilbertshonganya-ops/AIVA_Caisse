@@ -9,7 +9,7 @@ const Subscriptions = (() => {
     if(!businessId||!planId||!provider||!idempotencyKey) throw new Error('Paramètres de paiement incomplets.');
     return CloudDB.rpc('v13_create_checkout_request',{p_business_id:businessId,p_plan_id:planId,p_provider:provider,p_idempotency_key:idempotencyKey});
   }
-  async function startCinetPayCheckout({businessId,planId,idempotencyKey}){
+  async function startCinetPayCheckout({businessId,planId,idempotencyKey,phone}){
     if(!businessId||!planId) throw new Error('Business et plan requis.');
     const key = idempotencyKey || crypto.randomUUID();
     if(!window.AUTH_CONFIG?.supabaseUrl || !window.AUTH_CONFIG?.supabaseAnonKey) throw new Error('Le service n’est pas encore configuré. Contactez le support.');
@@ -19,10 +19,11 @@ const Subscriptions = (() => {
     const res = await fetch(`${window.AUTH_CONFIG.supabaseUrl}/functions/v1/cinetpay-checkout`,{
       method:'POST',
       headers:{'content-type':'application/json','authorization':`Bearer ${accessToken}`,'apikey':window.AUTH_CONFIG.supabaseAnonKey},
-      body:JSON.stringify({business_id:businessId,plan_id:planId,idempotency_key:key})
+      body:JSON.stringify({business_id:businessId,plan_id:planId,idempotency_key:key,phone:phone||''})
     });
     const data = await res.json().catch(()=>({}));
     if(!res.ok || !data.payment_url) throw new Error(data.error || 'Impossible de démarrer le paiement.');
+    try{localStorage.setItem('evobuskin_paiement_attente',data.payment_id||'')}catch(_){}
     window.location.assign(data.payment_url);
     return data;
   }

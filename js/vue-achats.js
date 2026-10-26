@@ -60,6 +60,7 @@ const VueAchats = {
     $('#fOk', f.el).addEventListener('click', async () => {
       const nom = $('#fNom', f.el).value.trim();
       if (!nom) { toast('Le nom est obligatoire', 'erreur'); return; }
+      if (!f0 && !(await Abonnement.verifierLimite('suppliers'))) return;
       const vt = validerTelRDC($('#fTel', f.el).value);
       if (!vt.ok) { toast(MESSAGE_TEL_RDC, 'erreur'); return; }
       const tel = vt.local;

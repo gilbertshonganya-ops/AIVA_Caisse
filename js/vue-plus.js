@@ -6,6 +6,7 @@ const VuePlus = {
       ['achats', '\u{1F69A}', 'Achats et fournisseurs', 'Entrées de stock, dettes envers les fournisseurs'],
       ['import', '\u{1F4E5}', 'Importer des produits', 'Depuis un fichier Excel ou CSV'],
       ['audit', '\u{1F50E}', 'Journal d\'activité', 'Qui a fait quoi, quand et dans quelle boutique'],
+      ['abonnement', '\u2B50', 'Mon abonnement', 'Niveau, limites et paiement'],
       ['boutiques', '\u{1F3EA}', 'Mes boutiques', 'Ajouter, ouvrir et gérer plusieurs boutiques'],
       ['equipe', '\u{1F465}', 'Équipe', 'Inviter des vendeurs, gérer les accès'],
       ['reglages', '\u2699\uFE0F', 'Réglages', 'Boutique, taux, mot de passe, sauvegarde']
