@@ -51,6 +51,10 @@ const Reseau = (() => {
     const m = String((texte && texte.message) || texte || '');
     const lim = m.match(/PLAN_LIMIT_REACHED:(\w+)/);
     if (lim) return 'Votre niveau d’abonnement ne permet pas d’ajouter plus de ' + (NOMS_LIMITES[lim[1]] || 'éléments') + '. Le patron peut passer au niveau supérieur dans Plus → Mon abonnement.';
+    if (/Invalid Refresh Token|Refresh Token Not Found|Already Used|refresh_token_not_found|session_not_found/i.test(m)) return 'Votre session a expiré. Reconnectez-vous.';
+    if (/Database error|querying schema|granting user|connection pool|too many connections|statement timeout/i.test(m)) return 'Le service est momentanément surchargé. Réessayez dans un instant.';
+    if (/PGRST20\d|Could not find the function|schema cache|Erreur 404/i.test(m)) return 'Le service est en cours de mise à jour. Réessayez dans quelques minutes ; si cela continue, contactez le support.';
+    if (/PAYMENT_URL_REFUSED/.test(m)) return 'La page de paiement n’a pas pu être ouverte en toute sécurité. Réessayez ou contactez le support.';
     if (/FEATURE_NOT_INCLUDED/.test(m)) return 'Cette fonction n’est pas incluse dans votre niveau d’abonnement. Le patron peut passer au niveau supérieur dans Plus → Mon abonnement.';
     if (/CINETPAY_INITIALIZATION_FAILED|CINETPAY_NOT_CONFIGURED|SERVER_CONFIG_MISSING|CHECKOUT_CREATE_FAILED/.test(m)) return 'Le service de paiement est momentanément indisponible. Réessayez dans un instant.';
     if (/PLAN_NOT_AVAILABLE|PLAN_NOT_FOUND/.test(m)) return 'Ce niveau d’abonnement n’est pas disponible pour le moment.';
@@ -66,7 +70,7 @@ const Reseau = (() => {
   }
   // Crée une erreur marquée "réseau"
   function erreur() { const e = new Error(MESSAGE); e.reseau = true; e.code = 'NETWORK'; return e; }
-  return { MESSAGE, estErreurReseau, traduire, erreur, lisible };
+  return { MESSAGE, GENERIQUE, estErreurReseau, traduire, erreur, lisible };
 })();
 window.Reseau = Reseau;
 

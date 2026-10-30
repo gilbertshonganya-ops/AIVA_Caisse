@@ -127,7 +127,7 @@ const VueEquipe = {
   async chargerInvitations() {
     const el = $('#eqInvitations', this.conteneur);
     try {
-      const rows = await Equipe.listerInvitations();
+      const rows = (await Equipe.listerInvitations()) || [];
       if (!rows.length) { el.textContent = 'Aucune invitation pour le moment.'; return; }
       const etat = { actif: ['badge', 'En attente'], utilise: ['badge gris', 'Utilisée'], expire: ['badge orange', 'Expirée'], revoque: ['badge rouge', 'Révoquée'] };
       const nbNettoyables = rows.filter((r) => r.status === 'expire' || r.status === 'revoque').length;
@@ -172,7 +172,7 @@ const VueEquipe = {
   async chargerEquipe() {
     const el = $('#eqEquipe', this.conteneur);
     try {
-      const rows = await Equipe.listerEquipe();
+      const rows = (await Equipe.listerEquipe()) || [];
       el.innerHTML = '<div class="liste">' + rows.map((m) =>
         '<div class="ligne"><div><div class="nom">' + esc(m.full_name || m.email || 'Sans nom') + '</div><div class="petit">' + esc(m.email || '') + '</div></div>' +
         '<div style="text-align:right"><span class="badge' + (m.is_owner ? '' : ' orange') + '">' + (m.is_owner ? 'Propriétaire' : 'Vendeur') + '</span>' + (m.suspended ? ' <span class="badge rouge">Suspendu</span>' : '') +
@@ -195,10 +195,11 @@ const VueEquipe = {
       const b = Periode.bornes(this.periodeActivite);
       const filtre = 'annulee=eq.false' + (b.debut > 0 ? '&date=gte.' + encodeURIComponent(new Date(b.debut).toISOString()) : '') +
         (isFinite(b.fin) ? '&date=lt.' + encodeURIComponent(new Date(b.fin).toISOString()) : '');
-      const [ventes, equipe] = await Promise.all([
+      const [ventes0, equipe0] = await Promise.all([
         CloudDB.list('sales', App.businessId, filtre + '&order=date.desc&limit=5000'),
         Equipe.listerEquipe()
       ]);
+      const ventes = ventes0 || [], equipe = equipe0 || [];
       const noms = {}; equipe.forEach((m) => { noms[m.user_id] = m.full_name || m.email || 'Vendeur'; });
       const agr = {};
       ventes.forEach((v) => {

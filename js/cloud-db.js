@@ -34,7 +34,10 @@ const CloudDB = (() => {
     let data = null;
     try { data = await response.json(); } catch (_) {}
     if (!response.ok) {
-      throw new Error(data?.message || data?.hint || data?.details || data?.error || 'Erreur Supabase.');
+      const err = new Error(data?.message || data?.hint || data?.details || data?.error || ('Erreur ' + response.status));
+      err.status = response.status; err.code = data?.code || response.status;
+      try { Diag.noter('donnees ' + String(options.query || '').split('?')[0].slice(0, 30), err); } catch (_) {}
+      throw err;
     }
     return data;
   }
@@ -89,7 +92,7 @@ const CloudDB = (() => {
     } catch (_) { throw Reseau.erreur(); }
     let data = null;
     try { data = await response.json(); } catch (_) {}
-    if (!response.ok) throw new Error(data?.message || data?.hint || data?.details || data?.error || 'Erreur RPC Supabase.');
+    if (!response.ok) { const e = new Error(data?.message || data?.hint || data?.details || data?.error || ('Erreur ' + response.status + ' ' + fn)); e.status = response.status; e.code = data?.code || response.status; try { Diag.noter('donnees ' + fn, e); } catch (_) {} throw e; }
     return data;
   }
 

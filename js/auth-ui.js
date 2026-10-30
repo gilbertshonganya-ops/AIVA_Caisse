@@ -98,7 +98,8 @@ const AuthUI = (() => {
     if (/user already registered/i.test(msg)) return 'Un compte existe déjà avec cette adresse email.';
     if (/database error saving new user|unexpected_failure/i.test(msg)) return accountType === 'vendeur' ? 'Code d’invitation invalide, expiré ou déjà utilisé, ou limite d’utilisateurs atteinte. Demandez un nouveau code au propriétaire.' : 'Impossible de créer le compte pour le moment. Réessayez plus tard.';
     if (/rate limit/i.test(msg)) return 'Trop de demandes. Patientez quelques instants avant de réessayer.';
-    return Reseau.lisible(msg);
+    const lisible = Reseau.lisible(msg);
+    return lisible === Reseau.GENERIQUE ? lisible + ' (code : ' + (Diag.dernierCode() || 'X') + ')' : lisible;
   }
 
   function notice(message, type = '') {
@@ -106,6 +107,18 @@ const AuthUI = (() => {
     if (!el) return;
     el.textContent = message;
     el.className = 'auth-message ' + type;
+    // Pour un incident technique : bouton qui copie le rapport à envoyer au support
+    let b = $('#authRapport');
+    const technique = type === 'erreur' && /\(code : |momentanément|mise à jour|ouverture de votre boutique|n’a pas pu/i.test(message || '');
+    if (technique) {
+      if (!b) {
+        b = document.createElement('button');
+        b.type = 'button'; b.id = 'authRapport'; b.className = 'btn gris'; b.style.marginTop = '8px';
+        b.textContent = 'Copier le rapport pour le support';
+        b.addEventListener('click', async () => { const ok = await Diag.copier(); toast(ok ? 'Rapport copié : envoyez-le au support.' : 'Copie impossible : notez le code affiché.', ok ? 'ok' : 'erreur'); });
+        el.insertAdjacentElement('afterend', b);
+      }
+    } else if (b) b.remove();
   }
 
   function submitButton(text) { return `<button class="btn auth-submit" id="authSubmit" type="submit">${esc(text)}</button>`; }
@@ -219,6 +232,7 @@ const AuthUI = (() => {
     if (!email || !password) return notice('Renseignez votre email et votre mot de passe.', 'erreur');
     if (AuthHorsLigne.attente() > 0) return afficherAttente();
     busy = true; $('#authSubmit').disabled = true; notice('');
+    let ouverture = false; // true une fois le mot de passe accepté : une erreur ensuite concerne l'ouverture de la boutique
     try {
       if (!navigator.onLine) { await connexionHorsLigne(email, password); return; }
       let data;
@@ -233,6 +247,7 @@ const AuthUI = (() => {
       }
       if (!data.access_token) throw new Error('Connexion non terminée. Vérifiez votre adresse email.');
       AuthHorsLigne.effacerEssais();
+      ouverture = true;
       await Chargeur.pendant(async () => {
         await AuthHorsLigne.memoriser(email, password, data.user);
         if (typeof App.apresAuthentification === 'function') await App.apresAuthentification(data);
@@ -240,7 +255,12 @@ const AuthUI = (() => {
       }, 'Ouverture de votre boutique…');
       Audit.log('connexion', { mode: 'avec Internet' });
       AuthHorsLigne.envoyerEchecsEnAttente();
-    } catch (err) { notice(errorText(err), 'erreur'); if (AuthHorsLigne.attente() > 0) afficherAttente(); }
+    } catch (err) {
+      try { Diag.noter(ouverture ? 'ouverture' : 'connexion', err); } catch (_) {}
+      const base = errorText(err);
+      notice((ouverture && !/session a expiré|incorrect/i.test(base) ? 'Connexion réussie, mais l’ouverture de votre boutique a échoué. ' : '') + base, 'erreur');
+      if (AuthHorsLigne.attente() > 0) afficherAttente();
+    }
     finally { busy = false; if ($('#authSubmit') && AuthHorsLigne.attente() <= 0) $('#authSubmit').disabled = false; }
   }
 
@@ -354,6 +374,6 @@ const AuthUI = (() => {
     return hash.get('access_token');
   }
 
-  return { afficherConnexion, afficherInscription, afficherRecuperation, afficherNouveauMotDePasse, afficherMfaSetup, recupererTokenDeRecuperation, strength, validPassword, MESSAGE_MDP };
+  return { afficherConnexion, afficherInscription, afficherRecuperation, afficherNouveauMotDePasse, afficherMfaSetup, recupererTokenDeRecuperation, strength, validPassword, MESSAGE_MDP, montrerErreur: (e) => notice(errorText(e), 'erreur') };
 })();
 window.AuthUI = AuthUI;

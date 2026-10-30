@@ -85,9 +85,9 @@ const App = {
       }, 'Ouverture de votre boutique…');
     } catch (e) {
       console.warn('Session non restaurée :', e);
-      if (!Auth.getSession() && !(Reseau.estErreurReseau(e))) { this.afficherConnexion(); return; }
+      try { Diag.noter('restauration', e); } catch (_) {}
       this.afficherConnexion();
-      const m = $('#authMessage'); if (m) { m.textContent = Reseau.traduire(e); m.className = 'auth-message erreur'; }
+      AuthUI.montrerErreur(e);
     }
   },
 

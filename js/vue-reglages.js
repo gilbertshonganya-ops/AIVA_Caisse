@@ -25,9 +25,11 @@ const VueReglages = {
           '<button class="btn gris" id="rCsvStock">Exporter le stock (Excel/CSV)</button>' +
         '</div><p class="petit" style="margin-top:10px">La sauvegarde protégée est chiffrée (AES-256). Sans le mot de passe, personne ne peut la rouvrir, pas même nous.</p></div>' +
       '<div id="zoneCompte"></div>' +
+      '<div class="carte"><h3>Aide</h3><p class="petit">Un problème qui revient ? Copiez le rapport et envoyez-le au support : il aide à trouver la cause rapidement. Il ne contient ni mot de passe ni adresse email.</p><button class="btn gris" id="rRapport">Copier le rapport pour le support</button></div>' +
       '<p class="petit texte-centre" style="margin:14px 0">EvoBuskin &middot; vos données sur tous vos appareils<br><a href="conditions.html" target="_blank" rel="noopener">Conditions d’utilisation</a> &middot; <a href="confidentialite.html" target="_blank" rel="noopener">Politique de confidentialité</a></p>';
 
     $('#rAff').value = r.affichage;
+    $('#rRapport').addEventListener('click', async () => { const ok = await Diag.copier(); toast(ok ? 'Rapport copié : envoyez-le au support.' : 'Copie impossible.', ok ? 'ok' : 'erreur'); });
     VueCompte.afficher($('#zoneCompte'), true); // mot de passe et suppression de compte
 
     $('#rSaveBoutique').addEventListener('click', async () => {

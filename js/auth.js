@@ -6,12 +6,40 @@ const Auth = (() => {
   function configure(){const c=CONFIG();return Boolean(c.supabaseUrl&&c.supabaseAnonKey)}
   function base(){return CONFIG().supabaseUrl.replace(/\/$/,'')}
   function headers(token){const c=CONFIG();const h={apikey:c.supabaseAnonKey,'Content-Type':'application/json'};if(token)h.Authorization='Bearer '+token;return h}
-  async function request(path,options={}){if(!configure())throw new Error('Le service n\'est pas encore configuré. Contactez le support.');if(typeof navigator!=='undefined'&&navigator.onLine===false)throw Reseau.erreur();let r;try{r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'})}catch(_){throw Reseau.erreur()}let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||('Erreur '+r.status+' '+path.split('?')[0]));e.code=d?.code||d?.error||r.status;e.status=r.status;throw e}return d}
+  async function request(path,options={}){if(!configure())throw new Error('Le service n\'est pas encore configuré. Contactez le support.');if(typeof navigator!=='undefined'&&navigator.onLine===false)throw Reseau.erreur();let r;try{r=await fetch(base()+path,{...options,headers:{...headers(options.accessToken),...(options.headers||{})},cache:'no-store'})}catch(_){throw Reseau.erreur()}let d=null;try{d=await r.json()}catch(_){}if(!r.ok){const e=new Error(d?.msg||d?.message||d?.error_description||d?.error||('Erreur '+r.status+' '+path.split('?')[0]));e.code=d?.code||d?.error||r.status;e.status=r.status;try{Diag.noter('auth '+path.split('?')[0].replace('/auth/v1/',''),e)}catch(_){}throw e}return d}
   function saveSession(s){if(!s){clearSession();return}const x={...s};delete x.password;localStorage.setItem(STORAGE_KEY,JSON.stringify(x));scheduleRefresh(x)}
   function getSession(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')}catch(_){return null}}
   function clearSession(){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=null;localStorage.removeItem(STORAGE_KEY)}
   function scheduleRefresh(s=getSession()){if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=null;if(!s?.refresh_token)return;const exp=Number(s.expires_at||0)*1000;const delay=Math.max(30000,exp?exp-Date.now()-60000:240000);refreshTimer=setTimeout(()=>refreshSession().catch(()=>{if(getSession()?.refresh_token)scheduleRefresh(getSession())}),Math.min(delay,20*60*1000))}
-  async function refreshSession(){if(refreshInFlight)return refreshInFlight;const s=getSession();if(!s?.refresh_token)return null;refreshInFlight=(async()=>{try{const d=await request('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:s.refresh_token})});saveSession(d);return d}catch(e){if(!e.reseau&&(e.status===400||e.status===401||e.status===403))clearSession();throw e}finally{refreshInFlight=null}})();return refreshInFlight}
+  // Renouvellement de la session. Plusieurs onglets ouverts renouvelaient le MÊME jeton en même temps :
+  // le serveur considère alors le jeton comme « déjà utilisé » et ferme la session partout.
+  // Désormais : un seul onglet renouvelle à la fois (verrou entre onglets), et les autres reprennent la session déjà renouvelée.
+  async function refreshSession(){
+    if(refreshInFlight)return refreshInFlight;
+    const avant=getSession();
+    if(!avant?.refresh_token)return null;
+    const jetonAvant=avant.refresh_token;
+    const travail=async()=>{
+      const s=getSession();
+      if(!s?.refresh_token)return null;
+      if(s.refresh_token!==jetonAvant)return s;                 // un autre onglet vient de renouveler la session
+      try{
+        const d=await request('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:s.refresh_token})});
+        saveSession(d);return d;
+      }catch(e){
+        const maintenant=getSession();
+        if(maintenant?.refresh_token&&maintenant.refresh_token!==jetonAvant)return maintenant; // renouvelée entre-temps ailleurs : on la garde
+        if(!e.reseau&&(e.status===400||e.status===401||e.status===403))clearSession();
+        throw e;
+      }
+    };
+    refreshInFlight=(async()=>{
+      try{return typeof navigator!=='undefined'&&navigator.locks&&navigator.locks.request?await navigator.locks.request('evobuskin-auth-refresh',travail):await travail()}
+      finally{refreshInFlight=null}
+    })();
+    return refreshInFlight;
+  }
+
   async function ensureFreshSession(){const s=getSession();if(!s)return null;if(typeof navigator!=='undefined'&&navigator.onLine===false)return s;const exp=Number(s.expires_at||0)*1000;if(exp&&exp-Date.now()<90000)return refreshSession();scheduleRefresh(s);return s}
   async function signUp({email,password,fullName,accountType,businessName,inviteCode}){if(accountType==='vendeur'&&!(inviteCode&&String(inviteCode).trim()))throw new Error('Un code d’invitation est requis pour un vendeur.');const d=await request('/auth/v1/signup',{method:'POST',body:JSON.stringify({email:email.trim().toLowerCase(),password,data:{full_name:fullName.trim(),requested_account_type:accountType,business_name:businessName.trim(),invite_code:inviteCode?inviteCode.trim():null}})});if(d.access_token)saveSession(d);return d}
   async function signIn(email,password){const d=await request('/auth/v1/token?grant_type=password',{method:'POST',body:JSON.stringify({email:email.trim().toLowerCase(),password})});if(d.user&&d.user.email_confirmed_at===null)throw new Error('EMAIL_NOT_CONFIRMED');saveSession(d);return d}

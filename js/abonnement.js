@@ -15,7 +15,8 @@ const Abonnement = (() => {
       if (!navigator.onLine || !Auth.getSession() || !App.businessId) throw Reseau.erreur();
       info = await CloudDB.rpc('v20_my_subscription', { p_business_id: App.businessId });
       await DB.ecrireParam(CLE_CACHE, { businessId: App.businessId, info, at: Date.now() });
-    } catch (_) {
+    } catch (e) {
+      if (navigator.onLine) { try { Diag.noter('abonnement', e); } catch (_) {} }
       const c = await DB.lireParam(CLE_CACHE, null);
       if (c && c.businessId === App.businessId) info = c.info;
     }
@@ -71,7 +72,10 @@ const Abonnement = (() => {
   function bandeau() {
     if (!info || !App.estPatron()) return '';
     let h = '';
-    if (info.tier !== 'free' && info.days_left != null && info.days_left <= 7) {
+    if (info.is_trial) {
+      h += '<div class="bandeau"><b>🎁 Essai gratuit ' + esc(info.name) + ' : ' + (info.days_left <= 0 ? 'dernier jour' : info.days_left + ' jour' + (info.days_left > 1 ? 's' : '') + ' restant' + (info.days_left > 1 ? 's' : '')) + '.</b> Choisissez un niveau avant la fin pour garder toutes vos fonctions.' +
+        '<button class="btn contour" data-aller-abonnement style="margin-top:8px">Choisir un niveau</button></div>';
+    } else if (info.tier !== 'free' && info.days_left != null && info.days_left <= 7) {
       h += '<div class="bandeau"><b>Votre abonnement ' + esc(info.name) + ' se termine ' + (info.days_left <= 0 ? 'aujourd’hui' : 'dans ' + info.days_left + ' jour' + (info.days_left > 1 ? 's' : '')) + '.</b> Renouvelez-le pour garder vos fonctions.' +
         '<button class="btn contour" data-aller-abonnement style="margin-top:8px">Renouveler</button></div>';
     }
@@ -174,6 +178,13 @@ const VueAbonnement = {
       return;
     }
     this.plans = plans;
+    if (!Abonnement.donnees()) {
+      conteneur.innerHTML = App.htmlRetour() + '<h2>Mon abonnement</h2><div class="bandeau rouge">' +
+        (navigator.onLine ? 'Votre abonnement n’a pas pu être lu pour le moment. Réessayez dans un instant.' : esc(Reseau.MESSAGE)) +
+        '<button class="btn contour" id="abReessayer" style="margin-top:8px">Réessayer</button></div>';
+      $('#abReessayer', conteneur).addEventListener('click', () => this.afficher(conteneur));
+      return;
+    }
     this.dessiner();
     const id = Abonnement.paiementEnAttente();
     if (id) this.suivre(id);
@@ -191,8 +202,8 @@ const VueAbonnement = {
     const fin = info.period_end ? formatDate(new Date(info.period_end).getTime()) : null;
     let html = App.htmlRetour() + '<h2>Mon abonnement</h2>' +
       '<div id="abSuivi"></div>' +
-      '<div class="carte"><div class="ab-niveau">Niveau actuel : <b>' + esc(info.name) + '</b></div>' +
-      (info.tier !== 'free' && fin ? '<p class="petit">Actif jusqu’au <b>' + esc(fin) + '</b> (' + info.days_left + ' jour' + (info.days_left > 1 ? 's' : '') + ' restant' + (info.days_left > 1 ? 's' : '') + ').</p>' : '<p class="petit">Niveau gratuit : vos données restent en ligne et sauvegardées.</p>') +
+      '<div class="carte"><div class="ab-niveau">' + (info.is_trial ? '🎁 Essai gratuit : <b>' + esc(info.name) + '</b>' : 'Niveau actuel : <b>' + esc(info.name) + '</b>') + '</div>' +
+      (info.tier !== 'free' && fin ? '<p class="petit">' + (info.is_trial ? 'Essai jusqu’au ' : 'Actif jusqu’au ') + '<b>' + esc(fin) + '</b> (' + info.days_left + ' jour' + (info.days_left > 1 ? 's' : '') + ' restant' + (info.days_left > 1 ? 's' : '') + ').' + (info.is_trial ? ' Ensuite, retour au niveau Gratuit : vos données sont conservées, mais ses limites s’appliquent (par exemple 2 vendeurs actifs).' : '') + '</p>' : '<p class="petit">Niveau gratuit : vos données restent en ligne et sauvegardées.</p>') +
       barre('shops', 'Boutiques') + barre('sellers', 'Vendeurs') + barre('products', 'Produits (cette boutique)') + barre('customers', 'Clients à crédit (cette boutique)') + barre('suppliers', 'Fournisseurs (cette boutique)') +
       (info.usage && info.usage.sellers_suspended > 0 ? '<p class="petit rouge-txt">' + info.usage.sellers_suspended + ' vendeur(s) suspendu(s) : ils retrouvent l’accès dès que votre niveau le permet.</p>' : '') +
       '</div>' +
@@ -236,7 +247,7 @@ const VueAbonnement = {
       if (!vt.ok || vt.vide) return err(MESSAGE_TEL_RDC);
       const b = $('#abPayer', f.el); b.disabled = true; b.textContent = 'Ouverture de la page de paiement…';
       try { await Abonnement.payer(p.id, vt.intl); }
-      catch (e) { b.disabled = false; b.textContent = 'Payer ' + Abonnement.prixTexte(p); err(Reseau.traduire(e)); }
+      catch (e) { b.disabled = false; b.textContent = 'Payer ' + Abonnement.prixTexte(p); err(Reseau.traduire(e) + (e.providerCode ? ' (code paiement : ' + e.providerCode + ')' : '')); }
     });
   },
 
