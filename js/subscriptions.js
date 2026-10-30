@@ -31,7 +31,7 @@ const Subscriptions = (() => {
     // Sécurité : on n'ouvre qu'une page https appartenant au prestataire de paiement (jamais une adresse inattendue)
     let cible;
     try{cible=new URL(data.payment_url)}catch(_){cible=null}
-    if(!cible||cible.protocol!=='https:'||!/(^|\.)cinetpay\.com$/i.test(cible.hostname)){
+    if(!cible||cible.protocol!=='https:'||!/(^|\.)cinetpay\.(com|net|co)$/i.test(cible.hostname)){
       const err = new Error('PAYMENT_URL_REFUSED'); try{Diag.noter('paiement',err,{hote:cible?cible.hostname:'?'})}catch(_){}
       throw err;
     }
