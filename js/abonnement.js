@@ -102,21 +102,24 @@ const Abonnement = (() => {
   const prixTexte = (p) => (p.currency === 'USD' ? Number(p.amount_minor).toLocaleString('fr-FR') + ' $' : Number(p.amount_minor).toLocaleString('fr-FR') + ' FC');
 
   // ---------- paiement ----------
-  async function payer(planId, telephone) {
-    return Subscriptions.startCinetPayCheckout({ businessId: App.businessId, planId, phone: telephone });
+  async function payer(planId) {
+    return Subscriptions.startCheckout({ businessId: App.businessId, planId });
   }
   function lireRetourPaiement() {
     try {
+      // pawaPay ramène le client avec ?depositId=… (= l'identifiant de notre paiement)
       const q = new URLSearchParams(location.search);
-      if (q.get('payment_return') === '1' && /^[0-9a-f-]{36}$/i.test(q.get('payment_id') || '')) {
-        localStorage.setItem(CLE_ATTENTE, q.get('payment_id'));
+      const idRetour = q.get('depositId') || q.get('payment_id') || '';
+      if (/^[0-9a-f-]{36}$/i.test(idRetour)) {
+        localStorage.setItem(CLE_ATTENTE, idRetour);
         history.replaceState(null, '', location.pathname);
       }
     } catch (_) {}
   }
   const paiementEnAttente = () => { try { return localStorage.getItem(CLE_ATTENTE) || ''; } catch (_) { return ''; } };
   const oublierPaiement = () => { try { localStorage.removeItem(CLE_ATTENTE); } catch (_) {} };
-  async function statutPaiement(id) { return CloudDB.rpc('v20_payment_status', { p_payment_id: id }); }
+  // On demande d'abord au serveur de vérifier auprès de pawaPay, puis on lit le statut enregistré en base
+  async function statutPaiement(id) { await Subscriptions.verifyPayment(id); return CloudDB.rpc('v20_payment_status', { p_payment_id: id }); }
 
   // ---------- cycle de vie ----------
   function demarrer() {
@@ -223,7 +226,7 @@ const VueAbonnement = {
           : '<button class="btn' + (t === 'pro' ? '' : ' contour') + '" data-choisir="' + esc(p.id) + '">' + (courant ? 'Renouveler' : 'Choisir ' + esc(p.name)) + '</button>') +
         '</div>';
     });
-    html += '</div><p class="petit">Paiement sécurisé : Orange Money, Airtel Money, M-Pesa ou carte bancaire. Aucune donnée n’est supprimée si un abonnement se termine.</p>';
+    html += '</div><p class="petit">Paiement sécurisé par mobile money : Orange Money, Airtel Money ou M-Pesa. Aucune donnée n’est supprimée si un abonnement se termine.</p>';
     el.innerHTML = html;
     $$('#abDuree button', el).forEach((b) => b.addEventListener('click', () => { this.mois = Number(b.dataset.m); this.dessiner(); }));
     $$('[data-choisir]', el).forEach((b) => b.addEventListener('click', () => this.choisir(b.dataset.choisir)));
@@ -237,16 +240,13 @@ const VueAbonnement = {
       '<div class="carte" style="margin:0 0 10px"><div class="ligne-flex"><span class="petit">Niveau</span><b>' + esc(p.name) + '</b></div>' +
       '<div class="ligne-flex"><span class="petit">Durée</span><b>' + p.period_months + ' mois</b></div>' +
       '<div class="ligne-flex"><span class="petit">Montant</span><b>' + esc(Abonnement.prixTexte(p)) + ' (≈ ' + formatUSD(Number(p.price_usd)) + ')</b></div></div>' +
-      '<label class="champ"><span>Votre numéro de téléphone</span><input id="abTel" inputmode="tel" maxlength="17" autocomplete="tel" placeholder="Ex : 0895006995"></label>' +
-      '<p class="petit">Vous serez envoyé sur la page sécurisée de paiement : choisissez Orange Money, Airtel Money, M-Pesa ou carte bancaire. Revenez ensuite dans l’application : l’abonnement s’active automatiquement.</p>' +
+      '<p class="petit">Vous serez envoyé sur la page sécurisée de paiement : choisissez votre opérateur (Orange Money, Airtel Money ou M-Pesa) et entrez votre numéro. Confirmez sur votre téléphone, puis revenez dans l’application : l’abonnement s’active automatiquement.</p>' +
       '<div class="bandeau rouge" id="abErr" hidden></div><button class="btn" id="abPayer">Payer ' + esc(Abonnement.prixTexte(p)) + '</button>');
     $('#abPayer', f.el).addEventListener('click', async () => {
       const err = (m) => { const e = $('#abErr', f.el); e.textContent = m; e.hidden = !m; };
       err('');
-      const vt = validerTelRDC($('#abTel', f.el).value);
-      if (!vt.ok || vt.vide) return err(MESSAGE_TEL_RDC);
       const b = $('#abPayer', f.el); b.disabled = true; b.textContent = 'Ouverture de la page de paiement…';
-      try { await Abonnement.payer(p.id, vt.intl); }
+      try { await Abonnement.payer(p.id); }
       catch (e) { b.disabled = false; b.textContent = 'Payer ' + Abonnement.prixTexte(p); err(Reseau.traduire(e) + (e.providerCode ? ' (code paiement : ' + e.providerCode + ')' : '')); }
     });
   },
